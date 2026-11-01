@@ -1,0 +1,33 @@
+# 构建产物
+build/
+build-*/
+*.o
+*.obj
+*.a
+*.lib
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+.ninja_deps
+.ninja_log
+build.ninja
+
+# 测试/运行产物
+*.edwl
+*.edwl.tmp
+*.part
+edwl_test_io.tmp
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 格式化工具的备份目录
+_backup_*/

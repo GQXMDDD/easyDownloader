@@ -1,0 +1,46 @@
+/*
+ * edwl - 平台抽象层：文件随机读写
+ *
+ * 句柄是不透明的 intptr_t：POSIX 下装 fd，Win32 下装 HANDLE。
+ * 核心层只通过本文件提供的函数操作它，不得解读其内容。
+ */
+#ifndef WGETX_PLATFORM_FILE_IO_H
+#define WGETX_PLATFORM_FILE_IO_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef intptr_t wgetx_file_t;
+
+/*
+ * 打开/创建文件用于随机写。
+ * 语义：文件不存在则创建；已存在则保持原内容（断点续传需要），
+ * 长度由 wgetx_file_truncate() 显式设定。
+ * 返回 0 成功，-1 失败。
+ */
+int wgetx_file_open_write(const char *path, wgetx_file_t *out);
+
+/* 以只读方式打开已存在的文件（完整性校验阶段用）。0 成功，-1 失败 */
+int wgetx_file_open_read(const char *path, wgetx_file_t *out);
+
+/* 把文件长度设为 size 字节（等价 ftruncate），预分配用。0 成功，-1 失败 */
+int wgetx_file_truncate(wgetx_file_t fd, uint64_t size);
+
+/* 读取当前文件长度。0 成功，-1 失败 */
+int wgetx_file_size(wgetx_file_t fd, uint64_t *out);
+
+/*
+ * 定位写（等价 pwrite）：从 offset 处写 count 字节。
+ * 返回实际写入字节数（可能小于 count），失败返回 -1。
+ */
+int64_t wgetx_file_pwrite(wgetx_file_t fd, const void *buf, size_t count,
+			  uint64_t offset);
+
+/* 定位读（等价 pread）：返回实际读到的字节数，0 表示已到文件尾，-1 失败 */
+int64_t wgetx_file_pread(wgetx_file_t fd, void *buf, size_t count,
+			 uint64_t offset);
+
+/* 关闭句柄。0 成功，-1 失败 */
+int wgetx_file_close(wgetx_file_t fd);
+
+#endif /* WGETX_PLATFORM_FILE_IO_H */
