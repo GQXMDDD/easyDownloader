@@ -268,6 +268,297 @@ int edwl_config_load(struct edwl_config *cfg, const char *path)
 	return 1;
 }
 
+static const char *section_of_key(const char *key)
+{
+	static const char *general[] = {
+	    "Threads",	   "DynamicThreads", "MaxSpeed",      "MinSpeed",
+	    "Timeout",	   "Retries",	     "RetryBackoff",  "OutputDir",
+	    "ChunkSizeMB", "UserAgent",	     "ResumeFileExt", "PauseOnExit",
+	    NULL};
+	static const char *logging[] = {"Enable",   "Level",	 "Output",
+					"FilePath", "Retention", "TimeFormat",
+					NULL};
+	static const char *blacklist[] = {"Hosts", "IPs", NULL};
+	static const char *speed[] = {"SpeedMultiplier", NULL};
+	const char **lists[] = {general, logging, blacklist, speed};
+	const char *names[] = {"General", "Logging", "Blacklist", "OpenSpeedy"};
+	size_t i;
+	size_t j;
+
+	for (i = 0; i < sizeof(lists) / sizeof(lists[0]); i++)
+		for (j = 0; lists[i][j]; j++)
+			if (ci_equal(key, lists[i][j]))
+				return names[i];
+	return NULL;
+}
+
+static int file_exists(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+
+	if (!f)
+		return 0;
+	fclose(f);
+	return 1;
+}
+
+void edwl_trim_inplace(char *s)
+{
+	char *p = s;
+	size_t len;
+
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (p != s)
+		memmove(s, p, strlen(p) + 1);
+	len = strlen(s);
+	while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' ||
+			   s[len - 1] == '\r' || s[len - 1] == '\n'))
+		s[--len] = '\0';
+}
+
+int edwl_config_set_file(const char *path, const char *pair)
+{
+	char section[64];
+	char key[64];
+	char val[512];
+	const char *eq;
+	const char *dot;
+	const char *sec;
+	char **lines = NULL;
+	size_t count = 0;
+	size_t cap = 0;
+	size_t i;
+	long target = -1;
+	long insert_at = -1;
+	int in_target = 0;
+	FILE *f;
+	char buf[2048];
+	int rc = 0;
+
+	if (!path || !pair)
+		return -1;
+	eq = strchr(pair, '=');
+	if (!eq || eq == pair)
+		return -1;
+
+	dot = NULL;
+	{
+		const char *p = pair;
+
+		while (p < eq) {
+			if (*p == '.') {
+				dot = p;
+				break;
+			}
+			p++;
+		}
+	}
+	if (dot) {
+		size_t n = (size_t)(dot - pair);
+
+		if (n == 0 || n >= sizeof(section))
+			return -1;
+		memcpy(section, pair, n);
+		section[n] = '\0';
+		snprintf(key, sizeof(key), "%s", dot + 1);
+	} else {
+		snprintf(key, sizeof(key), "%s", pair);
+		key[(size_t)(eq - pair) < sizeof(key) ? (size_t)(eq - pair)
+						      : sizeof(key) - 1] = '\0';
+		sec = section_of_key(key);
+		if (!sec)
+			return -2;
+		snprintf(section, sizeof(section), "%s", sec);
+	}
+	edwl_trim_inplace(key);
+
+	/* 带点号的写法规整成纯键名 */
+	if (dot) {
+		size_t k = 0;
+
+		while (dot[1 + k] && dot[1 + k] != '=' && k + 1 < sizeof(key)) {
+			key[k] = dot[1 + k];
+			k++;
+		}
+		key[k] = '\0';
+		edwl_trim_inplace(key);
+		if (!section_of_key(key))
+			return -2;
+	}
+
+	snprintf(val, sizeof(val), "%s", eq + 1);
+	edwl_trim_inplace(val);
+
+	if (!file_exists(path) && edwl_config_generate(path) != 0)
+		return -3;
+
+	f = fopen(path, "rb");
+	if (!f)
+		return -3;
+	while (fgets(buf, sizeof(buf), f)) {
+		char *copy = malloc(strlen(buf) + 1);
+
+		if (!copy)
+			break;
+		strcpy(copy, buf);
+		if (count == cap) {
+			size_t ncap = cap ? cap * 2 : 64;
+			char **nl = realloc(lines, ncap * sizeof(*nl));
+
+			if (!nl) {
+				free(copy);
+				break;
+			}
+			lines = nl;
+			cap = ncap;
+		}
+		lines[count++] = copy;
+	}
+	fclose(f);
+
+	for (i = 0; i < count; i++) {
+		char tmp[256];
+		char *p = lines[i];
+
+		snprintf(tmp, sizeof(tmp), "%s", p);
+		edwl_trim_inplace(tmp);
+		if (tmp[0] == '[') {
+			char secname[64];
+			size_t n = 0;
+
+			in_target = 0;
+			while (tmp[n + 1] && tmp[n + 1] != ']' &&
+			       n + 1 < sizeof(secname)) {
+				secname[n] = tmp[n + 1];
+				n++;
+			}
+			secname[n] = '\0';
+			if (ci_equal(secname, section))
+				in_target = 1;
+			continue;
+		}
+		if (!in_target)
+			continue;
+		if (tmp[0] == ';' || tmp[0] == '#' || tmp[0] == '\0')
+			continue;
+		{
+			char k2[64];
+			size_t n = 0;
+
+			while (tmp[n] && tmp[n] != '=' && n + 1 < sizeof(k2)) {
+				k2[n] = tmp[n];
+				n++;
+			}
+			k2[n] = '\0';
+			edwl_trim_inplace(k2);
+			if (ci_equal(k2, key)) {
+				target = (long)i;
+				break;
+			}
+		}
+	}
+
+	/* 没找到就插到该段最后一个非空行后面；段不存在就追加 */
+	if (target < 0) {
+		long last = -1;
+
+		in_target = 0;
+		for (i = 0; i < count; i++) {
+			char tmp[256];
+
+			snprintf(tmp, sizeof(tmp), "%s", lines[i]);
+			edwl_trim_inplace(tmp);
+			if (tmp[0] == '[') {
+				char secname[64];
+				size_t n = 0;
+
+				while (tmp[n + 1] && tmp[n + 1] != ']' &&
+				       n + 1 < sizeof(secname)) {
+					secname[n] = tmp[n + 1];
+					n++;
+				}
+				secname[n] = '\0';
+				in_target = ci_equal(secname, section);
+				if (in_target)
+					last = (long)i;
+				continue;
+			}
+			if (in_target && tmp[0] && tmp[0] != ';' &&
+			    tmp[0] != '#')
+				last = (long)i;
+		}
+		if (last >= 0) {
+			insert_at = last + 1;
+		} else {
+			insert_at = (long)count;
+			if (count + 2 <= cap) {
+				lines[count] = malloc(strlen(section) + 4);
+				if (lines[count])
+					snprintf(lines[count],
+						 strlen(section) + 4, "[%s]",
+						 section);
+				else
+					rc = -3;
+				lines[count + 1] = malloc(2);
+				if (lines[count + 1])
+					strcpy(lines[count + 1], "\n");
+				count += 2;
+			} else {
+				rc = -3;
+			}
+		}
+	}
+
+	if (rc == 0) {
+		char newline[600];
+		size_t need = strlen(key) + strlen(val) + 8;
+
+		snprintf(newline, sizeof(newline), "%s = %s\n", key, val);
+		if (target >= 0) {
+			free(lines[target]);
+			lines[target] = malloc(need);
+			if (lines[target])
+				strcpy(lines[target], newline);
+			else
+				rc = -3;
+		} else if (insert_at >= 0 && (size_t)insert_at <= count) {
+			char **nl = realloc(lines, (count + 1) * sizeof(*nl));
+			size_t k;
+
+			if (!nl) {
+				rc = -3;
+			} else {
+				lines = nl;
+				for (k = count; k > (size_t)insert_at; k--)
+					lines[k] = lines[k - 1];
+				lines[insert_at] = malloc(need);
+				if (!lines[insert_at])
+					rc = -3;
+				else
+					strcpy(lines[insert_at], newline);
+				count++;
+			}
+		}
+	}
+
+	if (rc == 0) {
+		f = fopen(path, "wb");
+		if (!f) {
+			rc = -3;
+		} else {
+			for (i = 0; i < count; i++)
+				fputs(lines[i], f);
+			fclose(f);
+		}
+	}
+
+	for (i = 0; i < count; i++)
+		free(lines[i]);
+	free(lines);
+	return rc;
+}
+
 int edwl_config_parse_multiplier(const char *text, double *out, int *is_auto)
 {
 	char *end = NULL;

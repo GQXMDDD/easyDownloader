@@ -49,6 +49,9 @@ struct cli {
 	int generate_config;
 	int no_blacklist;
 	int wait_exit;
+	int config_ls;
+	const char *sets[16];
+	int set_count;
 	unsigned set;
 };
 
@@ -91,7 +94,10 @@ static void usage(void)
 	    "      --no-proxy         忽略环境变量里的代理，强制直连\n"
 	    "\n"
 	    "配置文件:\n"
-	    "      --config FILE      指定配置文件（默认 ./edwl.ini）\n"
+	    "      --config           生成默认配置文件并打印\n"
+	    "      --config ls        展示当前配置\n"
+	    "      --config FILE      使用指定配置文件（默认 ./edwl.ini）\n"
+	    "      -set K=V           修改默认配置文件（不存在会自动生成）\n"
 	    "      --no-config        不读配置文件\n"
 	    "      --generate-config  生成默认配置模板后退出\n"
 	    "      --no-blacklist     本次忽略黑名单\n"
@@ -286,6 +292,21 @@ static int parse_args(int argc, char **argv, struct cli *c)
 
 	for (i = 1; i < argc; i++) {
 		const char *a = argv[i];
+		/* -set 必须最先判断，否则会被当成短选项 -s */
+		if (!strcmp(a, "-set") || !strcmp(a, "--set")) {
+			const char *v = long_value(argc, argv, &i, a, 4);
+
+			if (!v) {
+				c->bad_text = a;
+				return -1;
+			}
+			if (c->set_count >= 16) {
+				c->bad_text = "too many -set";
+				return -1;
+			}
+			c->sets[c->set_count++] = v;
+			continue;
+		}
 
 		if (strcmp(a, "--") == 0) {
 			for (i++; i < argc; i++)
@@ -363,14 +384,22 @@ static int parse_args(int argc, char **argv, struct cli *c)
 			c->wait_exit = 1;
 			continue;
 		}
-		if (!strncmp(a, "--config", 8)) {
-			const char *v = long_value(argc, argv, &i, a, 8);
+		if (!strcmp(a, "--config")) {
+			const char *nx = (i + 1 < argc) ? argv[i + 1] : NULL;
 
-			if (!v) {
-				c->bad_text = a;
-				return -1;
+			/* --config → 生成；--config ls → 展示；--config FILE →
+			 * 指定 */
+			if (!nx || nx[0] == '-') {
+				c->generate_config = 1;
+				continue;
 			}
-			c->config_path = v;
+			if (!strcmp(nx, "ls")) {
+				c->config_ls = 1;
+				i++;
+				continue;
+			}
+			c->config_path = nx;
+			i++;
 			continue;
 		}
 		if (!strcmp(a, "-O") || !strncmp(a, "-O", 2) ||
@@ -418,6 +447,42 @@ static int parse_args(int argc, char **argv, struct cli *c)
 }
 
 /* ---------- 入口 ---------- */
+
+static void dump_config(const struct edwl_config *cfg, const char *path)
+{
+	const struct edwl_mirror_map *m;
+
+	printf("配置文件: %s\n", path);
+	printf("[General]\n");
+	printf("  Threads        = %d\n", cfg->threads);
+	printf("  DynamicThreads = %s\n", cfg->dynamic_threads ? "on" : "off");
+	printf("  MaxSpeed       = %d KB/s\n", cfg->max_speed);
+	printf("  MinSpeed       = %d KB/s\n", cfg->min_speed);
+	printf("  Timeout        = %d s\n", cfg->timeout);
+	printf("  Retries        = %d\n", cfg->retries);
+	printf("  RetryBackoff   = %s\n", cfg->retry_backoff);
+	printf("  OutputDir      = %s\n", cfg->output_dir);
+	printf("  ChunkSizeMB    = %d\n", cfg->chunk_size_mb);
+	printf("  UserAgent      = %s\n", cfg->user_agent);
+	printf("  ResumeFileExt  = %s\n", cfg->resume_ext);
+	printf("[Logging]\n");
+	printf("  Enable         = %s\n", cfg->log_enable ? "on" : "off");
+	printf("  Level          = %s\n", cfg->log_level);
+	printf("  Output         = %s\n", cfg->log_output);
+	printf("  FilePath       = %s\n", cfg->log_filepath);
+	printf("  Retention      = %s\n", cfg->log_retention);
+	printf("  TimeFormat     = %s\n", cfg->log_time_format);
+	printf("[Blacklist]\n");
+	printf("  Enable         = %s\n", cfg->blacklist_enable ? "on" : "off");
+	printf("  Hosts          = %s\n", cfg->blacklist_hosts);
+	printf("  IPs            = %s\n", cfg->blacklist_ips);
+	printf("[OpenSpeedy]\n");
+	printf("  Enable         = %s\n",
+	       cfg->openspeedy_enable ? "on" : "off");
+	printf("  SpeedMultiplier= %s\n", cfg->openspeedy_multiplier);
+	for (m = cfg->mirrors; m; m = m->next)
+		printf("[Mirrors] %s = %s\n", m->original_host, m->mirrors);
+}
 
 static void report_bad_option(const struct cli *c)
 {
@@ -606,6 +671,46 @@ int edwl_main(int argc, char **argv)
 	}
 
 	edwl_config_init_defaults(&cfg);
+
+	/* -set K=V：改默认配置文件（不存在先生成），改完退出 */
+	if (c.set_count > 0) {
+		const char *path = c.config_path ? c.config_path : "edwl.ini";
+		int k;
+
+		for (k = 0; k < c.set_count; k++) {
+			if (edwl_config_set_file(path, c.sets[k]) != 0) {
+				char line[512];
+
+				snprintf(line, sizeof(line),
+					 "edwl: 设置失败: %s\n", c.sets[k]);
+				edwl_console_write_err(line);
+				edwl_config_free(&cfg);
+				edwl_console_shutdown();
+				return EDWL_EXIT_USAGE;
+			}
+		}
+		printf("已写入配置: %s\n", path);
+		if (!c.config_ls) {
+			edwl_config_free(&cfg);
+			edwl_console_shutdown();
+			return EDWL_EXIT_OK;
+		}
+	}
+
+	/* --config ls：展示当前生效配置 */
+	if (c.config_ls) {
+		const char *path = c.config_path ? c.config_path : "edwl.ini";
+
+		if (!c.no_config && edwl_config_load(&cfg, path) < 0) {
+			edwl_config_free(&cfg);
+			edwl_console_shutdown();
+			return EDWL_EXIT_USAGE;
+		}
+		dump_config(&cfg, path);
+		edwl_config_free(&cfg);
+		edwl_console_shutdown();
+		return EDWL_EXIT_OK;
+	}
 	if (c.generate_config) {
 		const char *path = c.config_path ? c.config_path : "edwl.ini";
 		char line[512];

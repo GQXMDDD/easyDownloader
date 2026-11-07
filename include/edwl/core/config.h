@@ -80,6 +80,13 @@ void edwl_config_free(struct edwl_config *cfg);
  *   数字   → *is_auto = 0，*out = 倍率（0.25 ~ 8.0）
  * 0 成功，-1 无法识别。
  */
+/*
+ * 修改配置文件里的某一项（保留原有注释与顺序）：
+ *   pair 形如 "Threads=16"、"Logging.Level=high"。
+ * 文件不存在时先生成模板。返回 0 成功，-1 参数错，-2 未知键，-3 IO 错。
+ */
+int edwl_config_set_file(const char *path, const char *pair);
+
 int edwl_config_parse_multiplier(const char *text, double *out, int *is_auto);
 
 /* 按原始域名找镜像行（大小写不敏感，精确匹配域名，不含端口） */

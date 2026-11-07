@@ -53,7 +53,7 @@ static void format_elapsed(uint64_t ms, char *buf, size_t size)
 size_t edwl_console_format_progress(const struct edwl_progress *p, char *buf,
 				    size_t size, int width)
 {
-	char done[32], total[32], speed[48], elapsed[24];
+	char done[32], total[32], speed[48], elapsed[24], eta[24] = "--:--";
 	char bar[80];
 	double pct = 0.0;
 	int bar_w;
@@ -78,8 +78,16 @@ size_t edwl_console_format_progress(const struct edwl_progress *p, char *buf,
 	format_speed(p->speed_bps, speed, sizeof(speed));
 	format_elapsed(p->elapsed_ms, elapsed, sizeof(elapsed));
 
+	/* 剩余时间：剩余字节 / 当前速度 */
+	eta[0] = '\0';
+	if (p->total > p->done && p->speed_bps > 0) {
+		uint64_t left_s = (p->total - p->done) / p->speed_bps;
+
+		format_elapsed(left_s * 1000ULL, eta, sizeof(eta));
+	}
+
 	/* 固定部分约占 46 列，剩下的给进度条 */
-	bar_w = width - 46;
+	bar_w = width - 62;
 	if (bar_w < 8)
 		bar_w = 8;
 	if (bar_w > 40)

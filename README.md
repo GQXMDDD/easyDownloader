@@ -122,7 +122,10 @@ edwl --no-range -O y.bin https://example.com/y.bin
 | `--sha256 HEX` | 下载完成后校验整文件 SHA-256 |
 | `--no-range` | 禁用分片，强制单连接 |
 | `--proxy URL` / `--no-proxy` | 指定代理 / 忽略环境变量代理 |
-| `--config FILE` | 指定配置文件（默认 `./edwl.ini`） |
+| `--config` | 生成默认配置文件（已存在则覆盖） |
+| `--config ls` | 展示当前生效配置 |
+| `--config FILE` | 使用指定配置文件（默认 `./edwl.ini`） |
+| `-set K=V` | 修改配置文件（不存在会自动生成），可重复；支持 `Logging.Level=high` 这种段名写法 |
 | `--no-config` | 不读配置文件 |
 | `--generate-config` | 生成默认配置模板后退出 |
 | `-W, --wait` | 结束前等回车（双击运行时方便看清结果） |
