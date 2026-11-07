@@ -14,9 +14,9 @@
 #include <stdint.h>
 
 #define EDWL_PROGRAM_NAME "edwl"
-#define EDWL_VERSION_STRING "0.1.0"
+#define EDWL_VERSION_STRING "0.2.0"
 #define EDWL_VERSION_MAJOR 0
-#define EDWL_VERSION_MINOR 1
+#define EDWL_VERSION_MINOR 2
 #define EDWL_VERSION_PATCH 0
 
 /* 退出码：与 wget 习惯保持一致 */
