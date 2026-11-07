@@ -17,56 +17,56 @@
 
 static void test_random_write_read(void)
 {
-	wgetx_file_t w = (wgetx_file_t)-1;
-	wgetx_file_t r = (wgetx_file_t)-1;
+	edwl_file_t w = (edwl_file_t)-1;
+	edwl_file_t r = (edwl_file_t)-1;
 	char buf[16];
 	uint64_t size = 0;
 
 	remove(TEST_FILE);
 
-	CHECK_INT(wgetx_file_open_write(TEST_FILE, &w), 0);
+	CHECK_INT(edwl_file_open_write(TEST_FILE, &w), 0);
 	CHECK(w >= 0);
-	CHECK_INT(wgetx_file_truncate(w, 100), 0);
+	CHECK_INT(edwl_file_truncate(w, 100), 0);
 
-	CHECK_INT(wgetx_file_pwrite(w, "AAAA", 4, 0), 4);
-	CHECK_INT(wgetx_file_pwrite(w, "BBBB", 4, 50), 4);
+	CHECK_INT(edwl_file_pwrite(w, "AAAA", 4, 0), 4);
+	CHECK_INT(edwl_file_pwrite(w, "BBBB", 4, 50), 4);
 
-	CHECK_INT(wgetx_file_size(w, &size), 0);
+	CHECK_INT(edwl_file_size(w, &size), 0);
 	CHECK_INT(size, 100);
-	CHECK_INT(wgetx_file_close(w), 0);
+	CHECK_INT(edwl_file_close(w), 0);
 
-	CHECK_INT(wgetx_file_open_read(TEST_FILE, &r), 0);
+	CHECK_INT(edwl_file_open_read(TEST_FILE, &r), 0);
 
 	memset(buf, 0, sizeof(buf));
-	CHECK_INT(wgetx_file_pread(r, buf, 4, 0), 4);
+	CHECK_INT(edwl_file_pread(r, buf, 4, 0), 4);
 	CHECK_STR(buf, "AAAA");
 
 	memset(buf, 0, sizeof(buf));
-	CHECK_INT(wgetx_file_pread(r, buf, 4, 50), 4);
+	CHECK_INT(edwl_file_pread(r, buf, 4, 50), 4);
 	CHECK_STR(buf, "BBBB");
 
 	/* 没写过的地方应该还是 0 */
 	memset(buf, 1, sizeof(buf));
-	CHECK_INT(wgetx_file_pread(r, buf, 4, 10), 4);
+	CHECK_INT(edwl_file_pread(r, buf, 4, 10), 4);
 	CHECK_INT(buf[0], 0);
 
 	/* 正好读到文件尾 / 跨过文件尾，都不能算错误 */
 	memset(buf, 0, sizeof(buf));
-	CHECK_INT(wgetx_file_pread(r, buf, 4, 100), 0);
+	CHECK_INT(edwl_file_pread(r, buf, 4, 100), 0);
 	memset(buf, 0, sizeof(buf));
-	CHECK_INT(wgetx_file_pread(r, buf, 4, 98), 2);
+	CHECK_INT(edwl_file_pread(r, buf, 4, 98), 2);
 
 	/* 只读句柄写入必须失败 */
-	CHECK(wgetx_file_pwrite(r, "XX", 2, 0) < 0);
+	CHECK(edwl_file_pwrite(r, "XX", 2, 0) < 0);
 
-	CHECK_INT(wgetx_file_close(r), 0);
+	CHECK_INT(edwl_file_close(r), 0);
 }
 
 static void test_missing_file(void)
 {
-	wgetx_file_t fd = (wgetx_file_t)-1;
+	edwl_file_t fd = (edwl_file_t)-1;
 
-	CHECK_INT(wgetx_file_open_read("edwl_no_such_file.tmp", &fd), -1);
+	CHECK_INT(edwl_file_open_read("edwl_no_such_file.tmp", &fd), -1);
 }
 
 int main(void)

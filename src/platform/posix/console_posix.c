@@ -25,7 +25,7 @@ static void on_sigint(int sig)
 	interrupted = 1;
 }
 
-int wgetx_console_init(void)
+int edwl_console_init(void)
 {
 	console_tty = isatty(STDERR_FILENO) ? 1 : 0;
 	console_ansi = console_tty;
@@ -33,7 +33,7 @@ int wgetx_console_init(void)
 	return console_ansi;
 }
 
-void wgetx_console_shutdown(void)
+void edwl_console_shutdown(void)
 {
 	if (progress_active) {
 		fputs("\r\033[K", stderr);
@@ -43,17 +43,17 @@ void wgetx_console_shutdown(void)
 	console_ansi = 0;
 }
 
-int wgetx_console_ansi(void)
+int edwl_console_ansi(void)
 {
 	return console_ansi;
 }
 
-int wgetx_console_tty(void)
+int edwl_console_tty(void)
 {
 	return console_tty;
 }
 
-int wgetx_console_width(void)
+int edwl_console_width(void)
 {
 	struct winsize ws;
 	int fd = console_tty ? STDERR_FILENO : STDOUT_FILENO;
@@ -67,7 +67,7 @@ int wgetx_console_width(void)
 	return 80;
 }
 
-void wgetx_console_write(const char *text)
+void edwl_console_write(const char *text)
 {
 	if (!text)
 		return;
@@ -75,7 +75,7 @@ void wgetx_console_write(const char *text)
 	fflush(stdout);
 }
 
-void wgetx_console_write_err(const char *text)
+void edwl_console_write_err(const char *text)
 {
 	if (!text)
 		return;
@@ -87,7 +87,7 @@ void wgetx_console_write_err(const char *text)
 	fflush(stderr);
 }
 
-void wgetx_console_progress_draw(const struct wgetx_progress *p)
+void edwl_console_progress_draw(const struct edwl_progress *p)
 {
 	char line[256];
 	size_t len;
@@ -95,8 +95,8 @@ void wgetx_console_progress_draw(const struct wgetx_progress *p)
 	if (!p)
 		return;
 
-	len = wgetx_console_format_progress(p, line, sizeof(line),
-					    wgetx_console_width());
+	len = edwl_console_format_progress(p, line, sizeof(line),
+					   edwl_console_width());
 	if (len == 0)
 		return;
 
@@ -109,7 +109,7 @@ void wgetx_console_progress_draw(const struct wgetx_progress *p)
 	fflush(stderr);
 }
 
-void wgetx_console_progress_end(void)
+void edwl_console_progress_end(void)
 {
 	if (!progress_active)
 		return;
@@ -118,7 +118,7 @@ void wgetx_console_progress_end(void)
 	progress_active = 0;
 }
 
-int wgetx_console_install_interrupt(void)
+int edwl_console_install_interrupt(void)
 {
 	struct sigaction sa;
 
@@ -133,12 +133,12 @@ int wgetx_console_install_interrupt(void)
 	return 0;
 }
 
-int wgetx_interrupt_requested(void)
+int edwl_interrupt_requested(void)
 {
 	return interrupted != 0;
 }
 
-void wgetx_interrupt_reset(void)
+void edwl_interrupt_reset(void)
 {
 	interrupted = 0;
 }

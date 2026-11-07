@@ -102,7 +102,7 @@ static int enable_vt(DWORD std_handle, DWORD *saved)
 	return 1;
 }
 
-int wgetx_console_init(void)
+int edwl_console_init(void)
 {
 	int ok_out, ok_err;
 
@@ -119,7 +119,7 @@ int wgetx_console_init(void)
 	return console_ansi;
 }
 
-void wgetx_console_shutdown(void)
+void edwl_console_shutdown(void)
 {
 	HANDLE h;
 
@@ -141,17 +141,17 @@ void wgetx_console_shutdown(void)
 	console_ansi = 0;
 }
 
-int wgetx_console_ansi(void)
+int edwl_console_ansi(void)
 {
 	return console_ansi;
 }
 
-int wgetx_console_tty(void)
+int edwl_console_tty(void)
 {
 	return console_tty;
 }
 
-int wgetx_console_width(void)
+int edwl_console_width(void)
 {
 	HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
 	CONSOLE_SCREEN_BUFFER_INFO info;
@@ -172,14 +172,14 @@ int wgetx_console_width(void)
 	return width;
 }
 
-void wgetx_console_write(const char *text)
+void edwl_console_write(const char *text)
 {
 	if (!text)
 		return;
 	write_text(STD_OUTPUT_HANDLE, stdout, text);
 }
 
-void wgetx_console_write_err(const char *text)
+void edwl_console_write_err(const char *text)
 {
 	if (!text)
 		return;
@@ -191,7 +191,7 @@ void wgetx_console_write_err(const char *text)
 	write_text(STD_ERROR_HANDLE, stderr, text);
 }
 
-void wgetx_console_progress_draw(const struct wgetx_progress *p)
+void edwl_console_progress_draw(const struct edwl_progress *p)
 {
 	char line[256];
 	size_t len;
@@ -200,8 +200,8 @@ void wgetx_console_progress_draw(const struct wgetx_progress *p)
 		return;
 
 	/* 进度行全是 ASCII，直接写字节即可，不受代码页影响 */
-	len = wgetx_console_format_progress(p, line, sizeof(line),
-					    wgetx_console_width());
+	len = edwl_console_format_progress(p, line, sizeof(line),
+					   edwl_console_width());
 	if (len == 0)
 		return;
 
@@ -214,7 +214,7 @@ void wgetx_console_progress_draw(const struct wgetx_progress *p)
 	fflush(stderr);
 }
 
-void wgetx_console_progress_end(void)
+void edwl_console_progress_end(void)
 {
 	if (!progress_active)
 		return;
@@ -223,19 +223,19 @@ void wgetx_console_progress_end(void)
 	progress_active = 0;
 }
 
-int wgetx_console_install_interrupt(void)
+int edwl_console_install_interrupt(void)
 {
 	if (!SetConsoleCtrlHandler(ctrl_handler, TRUE))
 		return -1;
 	return 0;
 }
 
-int wgetx_interrupt_requested(void)
+int edwl_interrupt_requested(void)
 {
 	return interrupted != 0;
 }
 
-void wgetx_interrupt_reset(void)
+void edwl_interrupt_reset(void)
 {
 	InterlockedExchange(&interrupted, 0);
 }

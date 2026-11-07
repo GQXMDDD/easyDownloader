@@ -8,31 +8,31 @@
  * 与 task_queue 的分工：task_queue 只管排队，thread_pool 管线程生命周期
  * 和"还有多少活没干完"的计数（含 worker 内部重新入队的重试任务）。
  */
-#ifndef WGETX_CORE_THREAD_POOL_H
-#define WGETX_CORE_THREAD_POOL_H
+#ifndef EDWL_CORE_THREAD_POOL_H
+#define EDWL_CORE_THREAD_POOL_H
 
 #include <stddef.h>
 
-struct wgetx_thread_pool;
+struct edwl_thread_pool;
 
-typedef void (*wgetx_pool_job_fn)(void *ctx, void *job);
+typedef void (*edwl_pool_job_fn)(void *ctx, void *job);
 
 /* 0 成功，-1 失败 */
-int wgetx_pool_create(struct wgetx_thread_pool **out, size_t workers,
-		      wgetx_pool_job_fn fn, void *ctx);
+int edwl_pool_create(struct edwl_thread_pool **out, size_t workers,
+		     edwl_pool_job_fn fn, void *ctx);
 
 /* 提交任务；池已停止返回 -1 */
-int wgetx_pool_submit(struct wgetx_thread_pool *p, void *job);
+int edwl_pool_submit(struct edwl_thread_pool *p, void *job);
 
 /* 等到"已提交的任务全部执行完"（含任务内部再提交的）返回 */
-int wgetx_pool_wait_idle(struct wgetx_thread_pool *p);
+int edwl_pool_wait_idle(struct edwl_thread_pool *p);
 
 /* 未完成的任务数（排队 + 执行中） */
-size_t wgetx_pool_outstanding(struct wgetx_thread_pool *p);
+size_t edwl_pool_outstanding(struct edwl_thread_pool *p);
 
-size_t wgetx_pool_workers(struct wgetx_thread_pool *p);
+size_t edwl_pool_workers(struct edwl_thread_pool *p);
 
 /* 关闭队列、join 所有线程并释放 */
-void wgetx_pool_destroy(struct wgetx_thread_pool *p);
+void edwl_pool_destroy(struct edwl_thread_pool *p);
 
-#endif /* WGETX_CORE_THREAD_POOL_H */
+#endif /* EDWL_CORE_THREAD_POOL_H */

@@ -28,7 +28,7 @@
 #include <edwl/platform/platform.h>
 #include <edwl/util/log.h>
 #include <edwl/util/url.h>
-#include <edwl/wgetx.h>
+#include <edwl/edwl.h>
 
 #define META_MAGIC "edwl-meta 1"
 #define META_SUFFIX ".edwl"
@@ -42,11 +42,11 @@
 #define PATH_LEN 1024
 
 struct dl_state {
-	const struct wgetx_download_opts *opts;
-	struct wgetx_sources *sources;
-	struct wgetx_segment_map map;
-	struct wgetx_mutex *mtx; /* 保护 map / single_done / 计数 */
-	wgetx_file_t file;
+	const struct edwl_download_opts *opts;
+	struct edwl_sources *sources;
+	struct edwl_segment_map map;
+	struct edwl_mutex *mtx; /* 保护 map / single_done / 计数 */
+	edwl_file_t file;
 
 	uint64_t total;
 	char output[PATH_LEN];
@@ -63,7 +63,7 @@ struct dl_state {
 	volatile int fatal; /* 遇到不可恢复的错误 */
 	int interrupted;
 	int resumed;
-	char last_error[WGETX_HTTP_ERR_LEN];
+	char last_error[EDWL_HTTP_ERR_LEN];
 };
 
 struct monitor {
@@ -78,7 +78,7 @@ struct monitor {
 
 struct seg_io {
 	struct dl_state *st;
-	struct wgetx_segment *seg;
+	struct edwl_segment *seg;
 };
 
 struct single_io {
@@ -87,7 +87,7 @@ struct single_io {
 
 /* ---------- 默认值 ---------- */
 
-void wgetx_download_opts_default(struct wgetx_download_opts *o)
+void edwl_download_opts_default(struct edwl_download_opts *o)
 {
 	if (!o)
 		return;
@@ -108,7 +108,7 @@ void wgetx_download_opts_default(struct wgetx_download_opts *o)
 }
 
 /* 调用方可能只填几个字段，其余补默认值 */
-static void fill_defaults(struct wgetx_download_opts *o)
+static void fill_defaults(struct edwl_download_opts *o)
 {
 	if (o->threads == 0)
 		o->threads = DEFAULT_THREADS;
@@ -160,15 +160,15 @@ static int resolve_output(struct dl_state *st)
 				return -1;
 			memcpy(st->output, out, len + 1);
 		} else {
-			if (wgetx_url_guess_filename(st->opts->urls[0], name,
-						     sizeof(name)) != 0)
+			if (edwl_url_guess_filename(st->opts->urls[0], name,
+						    sizeof(name)) != 0)
 				return -1;
 			snprintf(st->output, sizeof(st->output), "%s%s", out,
 				 name);
 		}
 	} else {
-		if (wgetx_url_guess_filename(st->opts->urls[0], name,
-					     sizeof(name)) != 0)
+		if (edwl_url_guess_filename(st->opts->urls[0], name,
+					    sizeof(name)) != 0)
 			return -1;
 		snprintf(st->output, sizeof(st->output), "%s", name);
 	}
@@ -182,17 +182,17 @@ static int open_output(struct dl_state *st)
 {
 	uint64_t prealloc = st->total;
 
-	if (wgetx_file_open_write(st->output, &st->file) != 0) {
+	if (edwl_file_open_write(st->output, &st->file) != 0) {
 		char msg[PATH_LEN + 64];
 
 		snprintf(msg, sizeof(msg), "无法打开输出文件: %s", st->output);
 		set_last_error(st, msg);
 		return -1;
 	}
-	if (wgetx_file_truncate(st->file, prealloc) != 0) {
+	if (edwl_file_truncate(st->file, prealloc) != 0) {
 		set_last_error(st, "无法预分配输出文件大小");
-		wgetx_file_close(st->file);
-		st->file = (wgetx_file_t)-1;
+		edwl_file_close(st->file);
+		st->file = (edwl_file_t)-1;
 		return -1;
 	}
 	return 0;
@@ -207,7 +207,7 @@ struct meta_piece {
 };
 
 static int write_meta_body(FILE *f, struct dl_state *st,
-			   const struct wgetx_segment *snap, size_t count)
+			   const struct edwl_segment *snap, size_t count)
 {
 	size_t i;
 
@@ -234,7 +234,7 @@ static int write_meta_body(FILE *f, struct dl_state *st,
 
 static int save_meta(struct dl_state *st)
 {
-	struct wgetx_segment *snap = NULL;
+	struct edwl_segment *snap = NULL;
 	char tmp[PATH_LEN + 32];
 	size_t count = 0;
 	FILE *f = NULL;
@@ -243,14 +243,14 @@ static int save_meta(struct dl_state *st)
 	if (!st->using_map || st->total == 0)
 		return -1;
 
-	wgetx_mutex_lock(st->mtx);
+	edwl_mutex_lock(st->mtx);
 	count = st->map.count;
 	if (count > 0) {
 		snap = malloc(count * sizeof(*snap));
 		if (snap)
 			memcpy(snap, st->map.segs, count * sizeof(*snap));
 	}
-	wgetx_mutex_unlock(st->mtx);
+	edwl_mutex_unlock(st->mtx);
 
 	if (!snap)
 		return -1;
@@ -307,7 +307,7 @@ static int meta_pieces_valid(const struct meta_piece *pieces, size_t count,
 static int install_meta_pieces(struct dl_state *st,
 			       const struct meta_piece *pieces, size_t count)
 {
-	struct wgetx_segment *segs;
+	struct edwl_segment *segs;
 	size_t i;
 
 	segs = calloc(count, sizeof(*segs));
@@ -320,11 +320,11 @@ static int install_meta_pieces(struct dl_state *st,
 		segs[i].end = pieces[i].end;
 		segs[i].pos = pieces[i].pos;
 		segs[i].state = (pieces[i].pos > pieces[i].end)
-				    ? WGETX_SEG_DONE
-				    : WGETX_SEG_PENDING;
+				    ? EDWL_SEG_DONE
+				    : EDWL_SEG_PENDING;
 	}
 
-	wgetx_segment_map_free(&st->map);
+	edwl_segment_map_free(&st->map);
 	st->map.segs = segs;
 	st->map.count = count;
 	st->map.total = st->total;
@@ -431,20 +431,20 @@ static int seg_write(void *ctx, const void *data, size_t len, uint64_t offset)
 {
 	struct seg_io *io = ctx;
 	struct dl_state *st = io->st;
-	struct wgetx_segment *seg = io->seg;
+	struct edwl_segment *seg = io->seg;
 	int64_t n;
 
 	if (offset < seg->begin || offset + len > seg->end + 1)
 		return -1; /* 服务器越界给了多余字节 */
 
-	n = wgetx_file_pwrite(st->file, data, len, offset);
+	n = edwl_file_pwrite(st->file, data, len, offset);
 	if (n < 0 || (size_t)n != len)
 		return -1;
 
-	wgetx_mutex_lock(st->mtx);
+	edwl_mutex_lock(st->mtx);
 	if (offset + len > seg->pos)
 		seg->pos = offset + len;
-	wgetx_mutex_unlock(st->mtx);
+	edwl_mutex_unlock(st->mtx);
 	return 0;
 }
 
@@ -454,7 +454,7 @@ static int seg_progress(void *ctx, uint64_t got)
 	struct dl_state *st = io->st;
 
 	(void)got;
-	if (wgetx_interrupt_requested() || st->fatal)
+	if (edwl_interrupt_requested() || st->fatal)
 		return 1;
 	return 0;
 }
@@ -466,13 +466,13 @@ static int single_write(void *ctx, const void *data, size_t len,
 	struct dl_state *st = io->st;
 	int64_t n;
 
-	n = wgetx_file_pwrite(st->file, data, len, offset);
+	n = edwl_file_pwrite(st->file, data, len, offset);
 	if (n < 0 || (size_t)n != len)
 		return -1;
 
-	wgetx_mutex_lock(st->mtx);
+	edwl_mutex_lock(st->mtx);
 	st->single_done = offset + len;
-	wgetx_mutex_unlock(st->mtx);
+	edwl_mutex_unlock(st->mtx);
 	return 0;
 }
 
@@ -481,14 +481,14 @@ static int single_progress(void *ctx, uint64_t got)
 	struct single_io *io = ctx;
 
 	(void)got;
-	if (wgetx_interrupt_requested() || io->st->fatal)
+	if (edwl_interrupt_requested() || io->st->fatal)
 		return 1;
 	return 0;
 }
 
 /* ---------- 单次传输 ---------- */
 
-static void build_http_opts(struct dl_state *st, struct wgetx_http_opts *o,
+static void build_http_opts(struct dl_state *st, struct edwl_http_opts *o,
 			    unsigned divisor)
 {
 	memset(o, 0, sizeof(*o));
@@ -510,11 +510,11 @@ static void build_http_opts(struct dl_state *st, struct wgetx_http_opts *o,
 	}
 }
 
-static int fetch_attempt(struct dl_state *st, struct wgetx_segment *seg)
+static int fetch_attempt(struct dl_state *st, struct edwl_segment *seg)
 {
-	struct wgetx_http *http = NULL;
-	struct wgetx_http_opts hopts;
-	struct wgetx_http_sink sink;
+	struct edwl_http *http = NULL;
+	struct edwl_http_opts hopts;
+	struct edwl_http_sink sink;
 	struct seg_io io;
 	const char *url;
 	size_t src = 0;
@@ -522,23 +522,23 @@ static int fetch_attempt(struct dl_state *st, struct wgetx_segment *seg)
 	uint64_t got = 0;
 	int ret;
 
-	if (wgetx_sources_pick(st->sources, &src) != 1) {
+	if (edwl_sources_pick(st->sources, &src) != 1) {
 		set_last_error(st, "所有源都在冷却中");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
-	url = wgetx_sources_url(st->sources, src);
+	url = edwl_sources_url(st->sources, src);
 	if (!url)
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 
 	build_http_opts(st, &hopts, st->opts->threads);
-	if (wgetx_http_open(&http, &hopts) != 0) {
+	if (edwl_http_open(&http, &hopts) != 0) {
 		set_last_error(st, "无法创建 HTTP 句柄");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 
-	wgetx_mutex_lock(st->mtx);
+	edwl_mutex_lock(st->mtx);
 	begin = seg->pos;
-	wgetx_mutex_unlock(st->mtx);
+	edwl_mutex_unlock(st->mtx);
 
 	io.st = st;
 	io.seg = seg;
@@ -546,67 +546,67 @@ static int fetch_attempt(struct dl_state *st, struct wgetx_segment *seg)
 	sink.progress = seg_progress;
 	sink.ctx = &io;
 
-	ret = wgetx_http_get_range(http, url, begin, seg->end, &sink, &got);
-	if (ret == WGETX_HTTP_OK) {
-		wgetx_sources_report_ok(st->sources, src);
+	ret = edwl_http_get_range(http, url, begin, seg->end, &sink, &got);
+	if (ret == EDWL_HTTP_OK) {
+		edwl_sources_report_ok(st->sources, src);
 	} else {
-		wgetx_sources_report_fail(st->sources, src);
-		set_last_error(st, wgetx_http_error(http));
-		wgetx_log_msg(WGETX_LOG_DEBUG, "分片 %llu [%llu-%llu] 失败: %s",
-			      (unsigned long long)seg->index,
-			      (unsigned long long)seg->begin,
-			      (unsigned long long)seg->end,
-			      wgetx_http_error(http));
+		edwl_sources_report_fail(st->sources, src);
+		set_last_error(st, edwl_http_error(http));
+		edwl_log_msg(EDWL_LOG_DEBUG, "分片 %llu [%llu-%llu] 失败: %s",
+			     (unsigned long long)seg->index,
+			     (unsigned long long)seg->begin,
+			     (unsigned long long)seg->end,
+			     edwl_http_error(http));
 	}
 
-	wgetx_http_close(http);
+	edwl_http_close(http);
 	return ret;
 }
 
-static int segment_run(struct dl_state *st, struct wgetx_segment *seg)
+static int segment_run(struct dl_state *st, struct edwl_segment *seg)
 {
 	unsigned attempt;
 
 	for (attempt = 0; attempt <= st->opts->retries; attempt++) {
 		int ret;
 
-		if (wgetx_interrupt_requested() || st->fatal)
+		if (edwl_interrupt_requested() || st->fatal)
 			break;
 
-		wgetx_mutex_lock(st->mtx);
+		edwl_mutex_lock(st->mtx);
 		if (seg->pos > seg->end) {
-			seg->state = WGETX_SEG_DONE;
-			wgetx_mutex_unlock(st->mtx);
+			seg->state = EDWL_SEG_DONE;
+			edwl_mutex_unlock(st->mtx);
 			return 0;
 		}
-		seg->state = WGETX_SEG_ACTIVE;
-		wgetx_mutex_unlock(st->mtx);
+		seg->state = EDWL_SEG_ACTIVE;
+		edwl_mutex_unlock(st->mtx);
 
 		ret = fetch_attempt(st, seg);
-		if (ret == WGETX_HTTP_OK) {
-			wgetx_mutex_lock(st->mtx);
-			seg->state = WGETX_SEG_DONE;
-			wgetx_mutex_unlock(st->mtx);
+		if (ret == EDWL_HTTP_OK) {
+			edwl_mutex_lock(st->mtx);
+			seg->state = EDWL_SEG_DONE;
+			edwl_mutex_unlock(st->mtx);
 			return 0;
 		}
 
-		wgetx_mutex_lock(st->mtx);
+		edwl_mutex_lock(st->mtx);
 		seg->attempts++;
-		wgetx_mutex_unlock(st->mtx);
+		edwl_mutex_unlock(st->mtx);
 
-		if (ret == WGETX_HTTP_ERR_INTERRUPTED)
+		if (ret == EDWL_HTTP_ERR_INTERRUPTED)
 			break;
-		if (ret == WGETX_HTTP_ERR_RANGE_IGNORED) {
+		if (ret == EDWL_HTTP_ERR_RANGE_IGNORED) {
 			set_last_error(st, "服务器无视 Range，放弃分片模式");
 			st->fatal = 1;
 			break;
 		}
-		wgetx_sleep_ms(backoff_ms(attempt));
+		edwl_sleep_ms(backoff_ms(attempt));
 	}
 
-	wgetx_mutex_lock(st->mtx);
-	seg->state = WGETX_SEG_PENDING;
-	wgetx_mutex_unlock(st->mtx);
+	edwl_mutex_lock(st->mtx);
+	seg->state = EDWL_SEG_PENDING;
+	edwl_mutex_unlock(st->mtx);
 	return -1;
 }
 
@@ -624,15 +624,15 @@ static void pool_job(void *ctx, void *job)
 
 static void snapshot(struct dl_state *st, uint64_t *done, size_t *done_count)
 {
-	wgetx_mutex_lock(st->mtx);
+	edwl_mutex_lock(st->mtx);
 	if (st->using_map) {
-		*done = wgetx_segment_map_done(&st->map);
-		*done_count = wgetx_segment_map_done_count(&st->map);
+		*done = edwl_segment_map_done(&st->map);
+		*done_count = edwl_segment_map_done_count(&st->map);
 	} else {
 		*done = st->single_done;
 		*done_count = 0;
 	}
-	wgetx_mutex_unlock(st->mtx);
+	edwl_mutex_unlock(st->mtx);
 }
 
 static void update_speed(struct monitor *mo, uint64_t done, uint64_t now)
@@ -650,12 +650,12 @@ static void update_speed(struct monitor *mo, uint64_t done, uint64_t now)
 static void draw_progress(struct monitor *mo, uint64_t done, size_t done_count,
 			  uint64_t now)
 {
-	struct wgetx_progress p;
+	struct edwl_progress p;
 	struct dl_state *st = mo->st;
 
 	if (!st->opts->show_progress)
 		return;
-	if (!wgetx_console_tty() && now - mo->last_draw_ms < PLAIN_TICK_MS)
+	if (!edwl_console_tty() && now - mo->last_draw_ms < PLAIN_TICK_MS)
 		return;
 
 	memset(&p, 0, sizeof(p));
@@ -665,7 +665,7 @@ static void draw_progress(struct monitor *mo, uint64_t done, size_t done_count,
 	p.segs_total = st->using_map ? (unsigned)st->map.count : 0;
 	p.segs_done = (unsigned)done_count;
 	p.elapsed_ms = now - mo->start_ms;
-	wgetx_console_progress_draw(&p);
+	edwl_console_progress_draw(&p);
 	mo->last_draw_ms = now;
 }
 
@@ -681,11 +681,11 @@ static void *monitor_main(void *arg)
 		int stop;
 
 		snapshot(st, &done, &done_count);
-		now = wgetx_now_ms();
+		now = edwl_now_ms();
 		update_speed(mo, done, now);
 		draw_progress(mo, done, done_count, now);
 
-		if (wgetx_interrupt_requested())
+		if (edwl_interrupt_requested())
 			st->interrupted = 1;
 
 		if (st->using_map && st->total > 0 &&
@@ -694,103 +694,103 @@ static void *monitor_main(void *arg)
 			save_meta(st);
 		}
 
-		wgetx_mutex_lock(st->mtx);
+		edwl_mutex_lock(st->mtx);
 		stop = mo->stop;
-		wgetx_mutex_unlock(st->mtx);
+		edwl_mutex_unlock(st->mtx);
 		if (stop)
 			break;
-		wgetx_sleep_ms(TICK_MS);
+		edwl_sleep_ms(TICK_MS);
 	}
 	return NULL;
 }
 
-static struct wgetx_thread *monitor_start(struct monitor *mo,
-					  struct dl_state *st)
+static struct edwl_thread *monitor_start(struct monitor *mo,
+					 struct dl_state *st)
 {
-	struct wgetx_thread *t = NULL;
+	struct edwl_thread *t = NULL;
 	size_t ignored = 0;
 
 	memset(mo, 0, sizeof(*mo));
 	mo->st = st;
-	mo->start_ms = wgetx_now_ms();
+	mo->start_ms = edwl_now_ms();
 	mo->last_ms = mo->start_ms;
 	mo->last_draw_ms = 0;
 	snapshot(st, &mo->last_done, &ignored);
 
-	if (wgetx_thread_create(&t, monitor_main, mo) != 0)
+	if (edwl_thread_create(&t, monitor_main, mo) != 0)
 		return NULL;
 	return t;
 }
 
-static void monitor_stop(struct monitor *mo, struct wgetx_thread *t)
+static void monitor_stop(struct monitor *mo, struct edwl_thread *t)
 {
 	if (!t)
 		return;
 
-	wgetx_mutex_lock(mo->st->mtx);
+	edwl_mutex_lock(mo->st->mtx);
 	mo->stop = 1;
-	wgetx_mutex_unlock(mo->st->mtx);
+	edwl_mutex_unlock(mo->st->mtx);
 
-	wgetx_thread_join(t);
-	wgetx_console_progress_end();
+	edwl_thread_join(t);
+	edwl_console_progress_end();
 }
 
 /* ---------- 探测 ---------- */
 
-static int probe_any(struct dl_state *st, struct wgetx_http_info *info)
+static int probe_any(struct dl_state *st, struct edwl_http_info *info)
 {
-	struct wgetx_http *http = NULL;
-	struct wgetx_http_opts hopts;
+	struct edwl_http *http = NULL;
+	struct edwl_http_opts hopts;
 	unsigned max_attempts;
 	unsigned attempt;
 
 	build_http_opts(st, &hopts, 1);
-	if (wgetx_http_open(&http, &hopts) != 0) {
+	if (edwl_http_open(&http, &hopts) != 0) {
 		set_last_error(st, "无法创建 HTTP 句柄");
 		return -1;
 	}
 
 	/* 至少让每个源都试一次，再叠加重试预算 */
 	max_attempts =
-	    st->opts->retries + 1 + (unsigned)wgetx_sources_count(st->sources);
+	    st->opts->retries + 1 + (unsigned)edwl_sources_count(st->sources);
 
 	for (attempt = 0; attempt < max_attempts; attempt++) {
 		size_t src = 0;
 		const char *url;
 		int ret;
 
-		if (wgetx_interrupt_requested()) {
+		if (edwl_interrupt_requested()) {
 			set_last_error(st, "已中断");
 			break;
 		}
-		if (wgetx_sources_pick(st->sources, &src) != 1) {
+		if (edwl_sources_pick(st->sources, &src) != 1) {
 			if (!st->last_error[0])
 				set_last_error(st, "所有源都在冷却中");
 			break;
 		}
-		url = wgetx_sources_url(st->sources, src);
+		url = edwl_sources_url(st->sources, src);
 		if (!url)
 			break;
 
-		ret = wgetx_http_probe(http, url, info);
-		if (ret == WGETX_HTTP_OK) {
-			wgetx_sources_report_ok(st->sources, src);
-			wgetx_http_close(http);
+		ret = edwl_http_probe(http, url, info);
+		if (ret == EDWL_HTTP_OK) {
+			edwl_sources_report_ok(st->sources, src);
+			edwl_http_close(http);
 			return 0;
 		}
 
-		wgetx_sources_report_fail(st->sources, src);
-		set_last_error(st, wgetx_http_error(http));
-		wgetx_log_msg(WGETX_LOG_WARN, "源 %zu 探测失败: %s", src,
-			      wgetx_http_error(http));
+		edwl_sources_report_fail(st->sources, src);
+		set_last_error(st, edwl_http_error(http));
+		edwl_log_msg(EDWL_LOG_WARN, "源 %zu 探测失败: %s", src,
+			     edwl_http_error(http));
 		/* 401/403/404 这类错误重试同一个源没意义，立刻换下一个源 */
 		if (info->status == 401 || info->status == 403 ||
 		    info->status == 404)
 			continue;
-		wgetx_sleep_ms(backoff_ms(attempt));
+		edwl_sleep_ms(backoff_ms(attempt));
 	}
 
-	wgetx_http_close(http);
+	edwl_http_close(http);
 	return -1;
 }
 
@@ -798,28 +798,28 @@ static int probe_any(struct dl_state *st, struct wgetx_http_info *info)
 
 static int parallel_download(struct dl_state *st)
 {
-	struct wgetx_thread_pool *pool = NULL;
-	struct wgetx_thread *mon = NULL;
+	struct edwl_thread_pool *pool = NULL;
+	struct edwl_thread *mon = NULL;
 	struct monitor mo;
 	uint64_t piece;
 	size_t threads;
 	size_t i;
-	int rc = WGETX_EXIT_OK;
+	int rc = EDWL_EXIT_OK;
 
-	piece = wgetx_segment_piece_size(st->total, st->opts->threads,
-					 st->opts->min_piece_size,
-					 st->opts->max_piece_size);
-	if (wgetx_segment_map_init(&st->map, st->total, piece,
-				   st->opts->max_pieces) != 0) {
+	piece = edwl_segment_piece_size(st->total, st->opts->threads,
+					st->opts->min_piece_size,
+					st->opts->max_piece_size);
+	if (edwl_segment_map_init(&st->map, st->total, piece,
+				  st->opts->max_pieces) != 0) {
 		set_last_error(st, "无法生成分片表");
-		return WGETX_EXIT_ERROR;
+		return EDWL_EXIT_ERROR;
 	}
 	st->using_map = 1;
 
 	if (st->opts->allow_resume && load_meta(st)) {
 		st->resumed = 1;
-		wgetx_log_msg(WGETX_LOG_INFO, "从断点恢复：%zu 片",
-			      st->map.count);
+		edwl_log_msg(EDWL_LOG_INFO, "从断点恢复：%zu 片",
+			     st->map.count);
 	}
 
 	if (open_output(st) != 0)
@@ -829,7 +829,7 @@ static int parallel_download(struct dl_state *st)
 
 	threads = st->map.count < st->opts->threads ? st->map.count
 						    : st->opts->threads;
-	if (wgetx_pool_create(&pool, threads, pool_job, st) != 0) {
+	if (edwl_pool_create(&pool, threads, pool_job, st) != 0) {
 		set_last_error(st, "无法创建线程池");
 		goto fail;
 	}
@@ -837,46 +837,46 @@ static int parallel_download(struct dl_state *st)
 	mon = monitor_start(&mo, st);
 
 	for (i = 0; i < st->map.count; i++) {
-		if (wgetx_segment_complete(&st->map.segs[i]))
+		if (edwl_segment_complete(&st->map.segs[i]))
 			continue;
-		if (wgetx_pool_submit(pool, (void *)(uintptr_t)(i + 1)) != 0) {
+		if (edwl_pool_submit(pool, (void *)(uintptr_t)(i + 1)) != 0) {
 			set_last_error(st, "任务提交失败");
 			break;
 		}
 	}
 
-	wgetx_pool_wait_idle(pool);
+	edwl_pool_wait_idle(pool);
 	monitor_stop(&mo, mon);
-	wgetx_pool_destroy(pool);
+	edwl_pool_destroy(pool);
 	pool = NULL;
 
-	wgetx_mutex_lock(st->mtx);
-	wgetx_segment_map_release_active(&st->map);
-	wgetx_mutex_unlock(st->mtx);
+	edwl_mutex_lock(st->mtx);
+	edwl_segment_map_release_active(&st->map);
+	edwl_mutex_unlock(st->mtx);
 
-	if (wgetx_segment_map_all_done(&st->map)) {
+	if (edwl_segment_map_all_done(&st->map)) {
 		remove(st->meta_path);
 		st->written = st->total;
-	} else if (wgetx_interrupt_requested() || st->interrupted) {
+	} else if (edwl_interrupt_requested() || st->interrupted) {
 		save_meta(st);
-		rc = WGETX_EXIT_INTERRUPTED;
+		rc = EDWL_EXIT_INTERRUPTED;
 	} else {
 		save_meta(st);
-		rc = WGETX_EXIT_ERROR;
+		rc = EDWL_EXIT_ERROR;
 	}
 
-	wgetx_file_close(st->file);
-	st->file = (wgetx_file_t)-1;
+	edwl_file_close(st->file);
+	st->file = (edwl_file_t)-1;
 	return rc;
 
 fail:
 	if (pool)
-		wgetx_pool_destroy(pool);
+		edwl_pool_destroy(pool);
 	if (st->file >= 0) {
-		wgetx_file_close(st->file);
-		st->file = (wgetx_file_t)-1;
+		edwl_file_close(st->file);
+		st->file = (edwl_file_t)-1;
 	}
-	rc = WGETX_EXIT_ERROR;
+	rc = EDWL_EXIT_ERROR;
 	return rc;
 }
 
@@ -884,21 +884,21 @@ fail:
 
 static int single_download(struct dl_state *st)
 {
-	struct wgetx_http *http = NULL;
-	struct wgetx_http_opts hopts;
-	struct wgetx_http_sink sink;
-	struct wgetx_thread *mon = NULL;
+	struct edwl_http *http = NULL;
+	struct edwl_http_opts hopts;
+	struct edwl_http_sink sink;
+	struct edwl_thread *mon = NULL;
 	struct monitor mo;
 	struct single_io io;
 	unsigned attempt;
 	int done = 0;
-	int rc = WGETX_EXIT_OK;
+	int rc = EDWL_EXIT_OK;
 
 	if (open_output(st) != 0)
-		return WGETX_EXIT_ERROR;
+		return EDWL_EXIT_ERROR;
 
 	build_http_opts(st, &hopts, 1);
-	if (wgetx_http_open(&http, &hopts) != 0) {
+	if (edwl_http_open(&http, &hopts) != 0) {
 		set_last_error(st, "无法创建 HTTP 句柄");
 		goto fail;
 	}
@@ -916,70 +916,70 @@ static int single_download(struct dl_state *st)
 		uint64_t got = 0;
 		int ret;
 
-		if (wgetx_interrupt_requested() || st->fatal)
+		if (edwl_interrupt_requested() || st->fatal)
 			break;
-		if (wgetx_sources_pick(st->sources, &src) != 1) {
+		if (edwl_sources_pick(st->sources, &src) != 1) {
 			if (!st->last_error[0])
 				set_last_error(st, "所有源都在冷却中");
 			break;
 		}
-		url = wgetx_sources_url(st->sources, src);
+		url = edwl_sources_url(st->sources, src);
 		if (!url)
 			break;
 
 		/* 重来就把之前那半截清掉，避免尾部残留 */
-		wgetx_file_truncate(st->file, st->total);
-		wgetx_mutex_lock(st->mtx);
+		edwl_file_truncate(st->file, st->total);
+		edwl_mutex_lock(st->mtx);
 		st->single_done = 0;
-		wgetx_mutex_unlock(st->mtx);
+		edwl_mutex_unlock(st->mtx);
 
-		ret = wgetx_http_get_all(http, url, &sink, &got);
-		if (ret == WGETX_HTTP_OK) {
-			wgetx_sources_report_ok(st->sources, src);
+		ret = edwl_http_get_all(http, url, &sink, &got);
+		if (ret == EDWL_HTTP_OK) {
+			edwl_sources_report_ok(st->sources, src);
 			done = 1;
 			break;
 		}
 
-		wgetx_sources_report_fail(st->sources, src);
-		set_last_error(st, wgetx_http_error(http));
-		if (ret == WGETX_HTTP_ERR_INTERRUPTED)
+		edwl_sources_report_fail(st->sources, src);
+		set_last_error(st, edwl_http_error(http));
+		if (ret == EDWL_HTTP_ERR_INTERRUPTED)
 			break;
-		wgetx_log_msg(WGETX_LOG_WARN, "单流下载失败: %s",
-			      wgetx_http_error(http));
-		wgetx_sleep_ms(backoff_ms(attempt));
+		edwl_log_msg(EDWL_LOG_WARN, "单流下载失败: %s",
+			     edwl_http_error(http));
+		edwl_sleep_ms(backoff_ms(attempt));
 	}
 
 	monitor_stop(&mo, mon);
-	wgetx_http_close(http);
+	edwl_http_close(http);
 
 	if (!done) {
-		if (wgetx_interrupt_requested())
-			rc = WGETX_EXIT_INTERRUPTED;
+		if (edwl_interrupt_requested())
+			rc = EDWL_EXIT_INTERRUPTED;
 		else
-			rc = WGETX_EXIT_ERROR;
-	} else if (wgetx_file_size(st->file, &st->written) != 0) {
+			rc = EDWL_EXIT_ERROR;
+	} else if (edwl_file_size(st->file, &st->written) != 0) {
 		st->written = st->single_done;
 	}
 
-	wgetx_file_close(st->file);
-	st->file = (wgetx_file_t)-1;
+	edwl_file_close(st->file);
+	st->file = (edwl_file_t)-1;
 	return rc;
 
 fail:
 	if (mon)
 		monitor_stop(&mo, mon);
 	if (http)
-		wgetx_http_close(http);
+		edwl_http_close(http);
 	if (st->file >= 0) {
-		wgetx_file_close(st->file);
-		st->file = (wgetx_file_t)-1;
+		edwl_file_close(st->file);
+		st->file = (edwl_file_t)-1;
 	}
-	return WGETX_EXIT_ERROR;
+	return EDWL_EXIT_ERROR;
 }
 
 /* ---------- 摘要 ---------- */
 
-static void print_summary(struct dl_state *st, struct wgetx_download_result *r)
+static void print_summary(struct dl_state *st, struct edwl_download_result *r)
 {
 	char size_text[32];
 	char speed_text[48];
@@ -989,18 +989,18 @@ static void print_summary(struct dl_state *st, struct wgetx_download_result *r)
 	if (!r || st->opts->quiet)
 		return;
 
-	elapsed = wgetx_now_ms() - st->start_ms;
-	wgetx_console_format_size(r->bytes, size_text, sizeof(size_text));
+	elapsed = edwl_now_ms() - st->start_ms;
+	edwl_console_format_size(r->bytes, size_text, sizeof(size_text));
 
-	wgetx_console_progress_end();
+	edwl_console_progress_end();
 	snprintf(line, sizeof(line), "已保存: %s\n", st->output);
-	wgetx_console_write(line);
+	edwl_console_write(line);
 
 	if (elapsed > 0 && r->bytes > 0) {
 		uint64_t bps = r->bytes * 1000ULL / elapsed;
 		char rate[32];
 
-		wgetx_console_format_size(bps, rate, sizeof(rate));
+		edwl_console_format_size(bps, rate, sizeof(rate));
 		snprintf(speed_text, sizeof(speed_text), "%s/s", rate);
 	} else {
 		snprintf(speed_text, sizeof(speed_text), "--");
@@ -1010,84 +1010,84 @@ static void print_summary(struct dl_state *st, struct wgetx_download_result *r)
 		 "大小: %s   用时: %llu.%01llu 秒   平均: %s\n", size_text,
 		 (unsigned long long)(elapsed / 1000),
 		 (unsigned long long)((elapsed % 1000) / 100), speed_text);
-	wgetx_console_write(line);
+	edwl_console_write(line);
 
 	if (r->range_used) {
 		snprintf(line, sizeof(line), "分片: %u 片, %u 路并发%s\n",
 			 r->pieces, st->opts->threads,
 			 r->resumed ? "（断点续传）" : "");
-		wgetx_console_write(line);
+		edwl_console_write(line);
 	} else {
 		snprintf(line, sizeof(line),
 			 "单连接下载（服务器不支持 Range 或已禁用分片）\n");
-		wgetx_console_write(line);
+		edwl_console_write(line);
 	}
 
 	if (r->verified == 1) {
 		snprintf(line, sizeof(line), "SHA-256: %s（校验通过）\n",
 			 r->sha256);
-		wgetx_console_write(line);
+		edwl_console_write(line);
 	} else if (r->verified == -1) {
 		snprintf(line, sizeof(line), "SHA-256: %s（不匹配，期望 %s）\n",
 			 r->sha256, st->opts->expected_sha256);
-		wgetx_console_write(line);
+		edwl_console_write(line);
 	}
 }
 
 /* ---------- 入口 ---------- */
 
-int wgetx_download_run(const struct wgetx_download_opts *opts,
-		       struct wgetx_download_result *result)
+int edwl_download_run(const struct edwl_download_opts *opts,
+		      struct edwl_download_result *result)
 {
-	struct wgetx_download_opts local;
-	struct wgetx_http_info info;
+	struct edwl_download_opts local;
+	struct edwl_http_info info;
 	struct dl_state st;
 	int can_range = 0;
-	int rc = WGETX_EXIT_OK;
+	int rc = EDWL_EXIT_OK;
 
 	if (result)
 		memset(result, 0, sizeof(*result));
 	if (!opts || !opts->urls || opts->url_count == 0)
-		return WGETX_EXIT_USAGE;
+		return EDWL_EXIT_USAGE;
 
 	local = *opts;
 	fill_defaults(&local);
 
 	memset(&st, 0, sizeof(st));
 	st.opts = &local;
-	st.file = (wgetx_file_t)-1;
-	st.start_ms = wgetx_now_ms();
+	st.file = (edwl_file_t)-1;
+	st.start_ms = edwl_now_ms();
 
-	if (wgetx_http_global_init() != 0) {
-		wgetx_log_msg(WGETX_LOG_ERROR, "libcurl 初始化失败");
-		return WGETX_EXIT_ERROR;
+	if (edwl_http_global_init() != 0) {
+		edwl_log_msg(EDWL_LOG_ERROR, "libcurl 初始化失败");
+		return EDWL_EXIT_ERROR;
 	}
-	if (wgetx_mutex_init(&st.mtx) != 0) {
-		wgetx_log_msg(WGETX_LOG_ERROR, "互斥量初始化失败");
-		wgetx_http_global_fini();
-		return WGETX_EXIT_ERROR;
+	if (edwl_mutex_init(&st.mtx) != 0) {
+		edwl_log_msg(EDWL_LOG_ERROR, "互斥量初始化失败");
+		edwl_http_global_fini();
+		return EDWL_EXIT_ERROR;
 	}
-	if (wgetx_sources_create(&st.sources, local.urls, local.url_count) !=
+	if (edwl_sources_create(&st.sources, local.urls, local.url_count) !=
 	    0) {
-		wgetx_log_msg(WGETX_LOG_ERROR, "源列表初始化失败");
-		wgetx_mutex_destroy(st.mtx);
-		wgetx_http_global_fini();
-		return WGETX_EXIT_ERROR;
+		edwl_log_msg(EDWL_LOG_ERROR, "源列表初始化失败");
+		edwl_mutex_destroy(st.mtx);
+		edwl_http_global_fini();
+		return EDWL_EXIT_ERROR;
 	}
-	if (wgetx_console_install_interrupt() != 0)
-		wgetx_log_msg(WGETX_LOG_DEBUG, "未能安装 Ctrl-C 处理器");
+	if (edwl_console_install_interrupt() != 0)
+		edwl_log_msg(EDWL_LOG_DEBUG, "未能安装 Ctrl-C 处理器");
 
 	if (resolve_output(&st) != 0) {
-		wgetx_log_msg(WGETX_LOG_ERROR, "无法确定输出文件名");
-		rc = WGETX_EXIT_ERROR;
+		edwl_log_msg(EDWL_LOG_ERROR, "无法确定输出文件名");
+		rc = EDWL_EXIT_ERROR;
 		goto out;
 	}
 
 	if (probe_any(&st, &info) != 0) {
-		wgetx_log_msg(WGETX_LOG_ERROR, "无法连接任何源: %s",
-			      st.last_error);
-		rc = wgetx_interrupt_requested() ? WGETX_EXIT_INTERRUPTED
-						 : WGETX_EXIT_ERROR;
+		edwl_log_msg(EDWL_LOG_ERROR, "无法连接任何源: %s",
+			     st.last_error);
+		rc = edwl_interrupt_requested() ? EDWL_EXIT_INTERRUPTED
+						: EDWL_EXIT_ERROR;
 		goto out;
 	}
 
@@ -1101,15 +1101,15 @@ int wgetx_download_run(const struct wgetx_download_opts *opts,
 		char line[256];
 
 		if (st.total > 0)
-			wgetx_console_format_size(st.total, size_text,
-						  sizeof(size_text));
+			edwl_console_format_size(st.total, size_text,
+						 sizeof(size_text));
 		else
 			snprintf(size_text, sizeof(size_text), "未知");
 		snprintf(line, sizeof(line),
 			 "目标: %s\n大小: %s\n源: %zu 个，服务器%s Range\n",
 			 st.output, size_text, local.url_count,
 			 info.range_supported ? "支持" : "不支持");
-		wgetx_console_write(line);
+		edwl_console_write(line);
 	}
 
 	can_range = local.allow_range && info.range_supported && st.total > 0 &&
@@ -1119,53 +1119,53 @@ int wgetx_download_run(const struct wgetx_download_opts *opts,
 	else
 		rc = single_download(&st);
 	if (result)
-		result->range_used = can_range && rc == WGETX_EXIT_OK;
+		result->range_used = can_range && rc == EDWL_EXIT_OK;
 
-	if (rc == WGETX_EXIT_OK && result) {
+	if (rc == EDWL_EXIT_OK && result) {
 		result->total = st.total;
 		result->bytes = st.written ? st.written : st.total;
 		result->pieces = (unsigned)st.map.count;
 		result->resumed = st.resumed;
 	}
 
-	if (rc == WGETX_EXIT_OK && local.expected_sha256) {
-		char actual[WGETX_SHA256_HEX];
+	if (rc == EDWL_EXIT_OK && local.expected_sha256) {
+		char actual[EDWL_SHA256_HEX];
 
-		if (wgetx_sha256_file(st.output, actual) != 0) {
-			wgetx_log_msg(WGETX_LOG_ERROR, "无法读取文件做校验");
-			rc = WGETX_EXIT_ERROR;
-		} else if (wgetx_hash_equals(actual, local.expected_sha256)) {
+		if (edwl_sha256_file(st.output, actual) != 0) {
+			edwl_log_msg(EDWL_LOG_ERROR, "无法读取文件做校验");
+			rc = EDWL_EXIT_ERROR;
+		} else if (edwl_hash_equals(actual, local.expected_sha256)) {
 			if (result) {
 				result->verified = 1;
 				snprintf(result->sha256, sizeof(result->sha256),
 					 "%s", actual);
 			}
 		} else {
-			wgetx_log_msg(WGETX_LOG_ERROR,
-				      "SHA-256 不匹配: 实际 %s", actual);
+			edwl_log_msg(EDWL_LOG_ERROR, "SHA-256 不匹配: 实际 %s",
+				     actual);
 			if (result) {
 				result->verified = -1;
 				snprintf(result->sha256, sizeof(result->sha256),
 					 "%s", actual);
 			}
-			rc = WGETX_EXIT_CHECKSUM;
+			rc = EDWL_EXIT_CHECKSUM;
 		}
 	}
 
-	if (rc == WGETX_EXIT_INTERRUPTED) {
-		wgetx_log_msg(WGETX_LOG_INFO, "已中断，断点保存在 %s",
-			      st.meta_path);
-	} else if (rc != WGETX_EXIT_OK && rc != WGETX_EXIT_CHECKSUM &&
+	if (rc == EDWL_EXIT_INTERRUPTED) {
+		edwl_log_msg(EDWL_LOG_INFO, "已中断，断点保存在 %s",
+			     st.meta_path);
+	} else if (rc != EDWL_EXIT_OK && rc != EDWL_EXIT_CHECKSUM &&
 		   st.last_error[0]) {
-		wgetx_log_msg(WGETX_LOG_ERROR, "%s", st.last_error);
+		edwl_log_msg(EDWL_LOG_ERROR, "%s", st.last_error);
 	}
 
-	print_summary(&st, rc == WGETX_EXIT_OK ? result : NULL);
+	print_summary(&st, rc == EDWL_EXIT_OK ? result : NULL);
 
 out:
-	wgetx_segment_map_free(&st.map);
-	wgetx_sources_destroy(st.sources);
-	wgetx_mutex_destroy(st.mtx);
-	wgetx_http_global_fini();
+	edwl_segment_map_free(&st.map);
+	edwl_sources_destroy(st.sources);
+	edwl_mutex_destroy(st.mtx);
+	edwl_http_global_fini();
 	return rc;
 }

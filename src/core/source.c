@@ -13,27 +13,27 @@
 #include <edwl/core/source.h>
 #include <edwl/platform/platform.h>
 
-#define WGETX_SRC_COOLDOWN_BASE_MS 1000ULL
-#define WGETX_SRC_COOLDOWN_MAX_MS 30000ULL
-#define WGETX_SRC_MAX_BACKOFF_SHIFT 5
+#define EDWL_SRC_COOLDOWN_BASE_MS 1000ULL
+#define EDWL_SRC_COOLDOWN_MAX_MS 30000ULL
+#define EDWL_SRC_MAX_BACKOFF_SHIFT 5
 
-struct wgetx_source_item {
+struct edwl_source_item {
 	char *url;
 	unsigned fails;
 	uint64_t ready_at_ms;
 };
 
-struct wgetx_sources {
-	struct wgetx_mutex *mtx;
-	struct wgetx_source_item *items;
+struct edwl_sources {
+	struct edwl_mutex *mtx;
+	struct edwl_source_item *items;
 	size_t count;
 	size_t cursor;
 };
 
-int wgetx_sources_create(struct wgetx_sources **out, const char *const *urls,
-			 size_t count)
+int edwl_sources_create(struct edwl_sources **out, const char *const *urls,
+			size_t count)
 {
-	struct wgetx_sources *s;
+	struct edwl_sources *s;
 	size_t i;
 
 	if (!out || !urls || count == 0)
@@ -47,7 +47,7 @@ int wgetx_sources_create(struct wgetx_sources **out, const char *const *urls,
 	if (!s->items)
 		goto fail_items;
 
-	if (wgetx_mutex_init(&s->mtx) != 0)
+	if (edwl_mutex_init(&s->mtx) != 0)
 		goto fail_mutex;
 
 	s->count = count;
@@ -68,7 +68,7 @@ fail_copy:
 		i--;
 		free(s->items[i].url);
 	}
-	wgetx_mutex_destroy(s->mtx);
+	edwl_mutex_destroy(s->mtx);
 fail_mutex:
 	free(s->items);
 fail_items:
@@ -76,7 +76,7 @@ fail_items:
 	return -1;
 }
 
-void wgetx_sources_destroy(struct wgetx_sources *s)
+void edwl_sources_destroy(struct edwl_sources *s)
 {
 	size_t i;
 
@@ -85,24 +85,24 @@ void wgetx_sources_destroy(struct wgetx_sources *s)
 	for (i = 0; i < s->count; i++) {
 		free(s->items[i].url);
 	}
-	wgetx_mutex_destroy(s->mtx);
+	edwl_mutex_destroy(s->mtx);
 	free(s->items);
 	free(s);
 }
 
-size_t wgetx_sources_count(const struct wgetx_sources *s)
+size_t edwl_sources_count(const struct edwl_sources *s)
 {
 	return s ? s->count : 0;
 }
 
-const char *wgetx_sources_url(struct wgetx_sources *s, size_t index)
+const char *edwl_sources_url(struct edwl_sources *s, size_t index)
 {
 	if (!s || index >= s->count)
 		return NULL;
 	return s->items[index].url;
 }
 
-int wgetx_sources_pick(struct wgetx_sources *s, size_t *index)
+int edwl_sources_pick(struct edwl_sources *s, size_t *index)
 {
 	uint64_t now;
 	size_t i;
@@ -110,56 +110,56 @@ int wgetx_sources_pick(struct wgetx_sources *s, size_t *index)
 	if (!s || !index)
 		return 0;
 
-	now = wgetx_now_ms();
-	wgetx_mutex_lock(s->mtx);
+	now = edwl_now_ms();
+	edwl_mutex_lock(s->mtx);
 	for (i = 0; i < s->count; i++) {
 		size_t idx = (s->cursor + i) % s->count;
 
 		if (s->items[idx].ready_at_ms <= now) {
 			s->cursor = (idx + 1) % s->count;
 			*index = idx;
-			wgetx_mutex_unlock(s->mtx);
+			edwl_mutex_unlock(s->mtx);
 			return 1;
 		}
 	}
-	wgetx_mutex_unlock(s->mtx);
+	edwl_mutex_unlock(s->mtx);
 	return 0;
 }
 
-void wgetx_sources_report_ok(struct wgetx_sources *s, size_t index)
+void edwl_sources_report_ok(struct edwl_sources *s, size_t index)
 {
 	if (!s || index >= s->count)
 		return;
-	wgetx_mutex_lock(s->mtx);
+	edwl_mutex_lock(s->mtx);
 	s->items[index].fails = 0;
 	s->items[index].ready_at_ms = 0;
-	wgetx_mutex_unlock(s->mtx);
+	edwl_mutex_unlock(s->mtx);
 }
 
-void wgetx_sources_report_fail(struct wgetx_sources *s, size_t index)
+void edwl_sources_report_fail(struct edwl_sources *s, size_t index)
 {
-	struct wgetx_source_item *it;
+	struct edwl_source_item *it;
 	unsigned shift;
 	uint64_t cool;
 
 	if (!s || index >= s->count)
 		return;
 
-	wgetx_mutex_lock(s->mtx);
+	edwl_mutex_lock(s->mtx);
 	it = &s->items[index];
 	if (it->fails < 1000)
 		it->fails++;
 	shift = it->fails > 0 ? it->fails - 1 : 0;
-	if (shift > WGETX_SRC_MAX_BACKOFF_SHIFT)
-		shift = WGETX_SRC_MAX_BACKOFF_SHIFT;
-	cool = WGETX_SRC_COOLDOWN_BASE_MS << shift;
-	if (cool > WGETX_SRC_COOLDOWN_MAX_MS)
-		cool = WGETX_SRC_COOLDOWN_MAX_MS;
-	it->ready_at_ms = wgetx_now_ms() + cool;
-	wgetx_mutex_unlock(s->mtx);
+	if (shift > EDWL_SRC_MAX_BACKOFF_SHIFT)
+		shift = EDWL_SRC_MAX_BACKOFF_SHIFT;
+	cool = EDWL_SRC_COOLDOWN_BASE_MS << shift;
+	if (cool > EDWL_SRC_COOLDOWN_MAX_MS)
+		cool = EDWL_SRC_COOLDOWN_MAX_MS;
+	it->ready_at_ms = edwl_now_ms() + cool;
+	edwl_mutex_unlock(s->mtx);
 }
 
-uint64_t wgetx_sources_cooldown_left(struct wgetx_sources *s)
+uint64_t edwl_sources_cooldown_left(struct edwl_sources *s)
 {
 	uint64_t now, best = 0;
 	size_t i;
@@ -167,8 +167,8 @@ uint64_t wgetx_sources_cooldown_left(struct wgetx_sources *s)
 	if (!s)
 		return 0;
 
-	now = wgetx_now_ms();
-	wgetx_mutex_lock(s->mtx);
+	now = edwl_now_ms();
+	edwl_mutex_lock(s->mtx);
 	for (i = 0; i < s->count; i++) {
 		uint64_t left = s->items[i].ready_at_ms > now
 				    ? s->items[i].ready_at_ms - now
@@ -177,22 +177,22 @@ uint64_t wgetx_sources_cooldown_left(struct wgetx_sources *s)
 		if (left > 0 && (best == 0 || left < best))
 			best = left;
 	}
-	wgetx_mutex_unlock(s->mtx);
+	edwl_mutex_unlock(s->mtx);
 	return best;
 }
 
-size_t wgetx_sources_healthy(struct wgetx_sources *s)
+size_t edwl_sources_healthy(struct edwl_sources *s)
 {
 	size_t n = 0;
 	size_t i;
 
 	if (!s)
 		return 0;
-	wgetx_mutex_lock(s->mtx);
+	edwl_mutex_lock(s->mtx);
 	for (i = 0; i < s->count; i++) {
 		if (s->items[i].fails == 0)
 			n++;
 	}
-	wgetx_mutex_unlock(s->mtx);
+	edwl_mutex_unlock(s->mtx);
 	return n;
 }

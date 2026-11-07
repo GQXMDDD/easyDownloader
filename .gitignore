@@ -31,3 +31,6 @@ edwl_test_io.tmp
 
 # 格式化工具的备份目录
 _backup_*/
+
+# Windows 资源管理器生成的文件夹元数据
+desktop.ini

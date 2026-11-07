@@ -9,23 +9,23 @@
 #include <edwl/core/task_queue.h>
 #include <edwl/platform/platform.h>
 
-struct wgetx_tq_node {
+struct edwl_tq_node {
 	void *item;
-	struct wgetx_tq_node *next;
+	struct edwl_tq_node *next;
 };
 
-struct wgetx_task_queue {
-	struct wgetx_mutex *mtx;
-	struct wgetx_cond *cond;
-	struct wgetx_tq_node *head;
-	struct wgetx_tq_node *tail;
+struct edwl_task_queue {
+	struct edwl_mutex *mtx;
+	struct edwl_cond *cond;
+	struct edwl_tq_node *head;
+	struct edwl_tq_node *tail;
 	size_t count;
 	int closed;
 };
 
-int wgetx_tq_create(struct wgetx_task_queue **out)
+int edwl_tq_create(struct edwl_task_queue **out)
 {
-	struct wgetx_task_queue *q;
+	struct edwl_task_queue *q;
 
 	if (!out)
 		return -1;
@@ -34,44 +34,44 @@ int wgetx_tq_create(struct wgetx_task_queue **out)
 	if (!q)
 		return -1;
 
-	if (wgetx_mutex_init(&q->mtx) != 0)
+	if (edwl_mutex_init(&q->mtx) != 0)
 		goto fail_mutex;
-	if (wgetx_cond_init(&q->cond) != 0)
+	if (edwl_cond_init(&q->cond) != 0)
 		goto fail_cond;
 
 	*out = q;
 	return 0;
 
 fail_cond:
-	wgetx_mutex_destroy(q->mtx);
+	edwl_mutex_destroy(q->mtx);
 fail_mutex:
 	free(q);
 	return -1;
 }
 
-void wgetx_tq_destroy(struct wgetx_task_queue *q)
+void edwl_tq_destroy(struct edwl_task_queue *q)
 {
-	struct wgetx_tq_node *node;
+	struct edwl_tq_node *node;
 
 	if (!q)
 		return;
 
 	node = q->head;
 	while (node) {
-		struct wgetx_tq_node *next = node->next;
+		struct edwl_tq_node *next = node->next;
 
 		free(node);
 		node = next;
 	}
 
-	wgetx_cond_destroy(q->cond);
-	wgetx_mutex_destroy(q->mtx);
+	edwl_cond_destroy(q->cond);
+	edwl_mutex_destroy(q->mtx);
 	free(q);
 }
 
-int wgetx_tq_push(struct wgetx_task_queue *q, void *item)
+int edwl_tq_push(struct edwl_task_queue *q, void *item)
 {
-	struct wgetx_tq_node *node;
+	struct edwl_tq_node *node;
 
 	if (!q)
 		return -1;
@@ -81,9 +81,9 @@ int wgetx_tq_push(struct wgetx_task_queue *q, void *item)
 		return -1;
 	node->item = item;
 
-	wgetx_mutex_lock(q->mtx);
+	edwl_mutex_lock(q->mtx);
 	if (q->closed) {
-		wgetx_mutex_unlock(q->mtx);
+		edwl_mutex_unlock(q->mtx);
 		free(node);
 		return -1;
 	}
@@ -93,25 +93,25 @@ int wgetx_tq_push(struct wgetx_task_queue *q, void *item)
 		q->head = node;
 	q->tail = node;
 	q->count++;
-	wgetx_cond_signal(q->cond);
-	wgetx_mutex_unlock(q->mtx);
+	edwl_cond_signal(q->cond);
+	edwl_mutex_unlock(q->mtx);
 	return 0;
 }
 
-int wgetx_tq_pop(struct wgetx_task_queue *q, void **item)
+int edwl_tq_pop(struct edwl_task_queue *q, void **item)
 {
-	struct wgetx_tq_node *node;
+	struct edwl_tq_node *node;
 
 	if (!q || !item)
 		return -1;
 
-	wgetx_mutex_lock(q->mtx);
+	edwl_mutex_lock(q->mtx);
 	while (q->count == 0 && !q->closed)
-		wgetx_cond_wait(q->cond, q->mtx);
+		edwl_cond_wait(q->cond, q->mtx);
 
 	/* 走到这里只可能是"已关闭且取空"，或者 cond 出错 */
 	if (q->count == 0) {
-		wgetx_mutex_unlock(q->mtx);
+		edwl_mutex_unlock(q->mtx);
 		return -1;
 	}
 
@@ -120,23 +120,23 @@ int wgetx_tq_pop(struct wgetx_task_queue *q, void **item)
 	if (!q->head)
 		q->tail = NULL;
 	q->count--;
-	wgetx_mutex_unlock(q->mtx);
+	edwl_mutex_unlock(q->mtx);
 
 	*item = node->item;
 	free(node);
 	return 0;
 }
 
-int wgetx_tq_try_pop(struct wgetx_task_queue *q, void **item)
+int edwl_tq_try_pop(struct edwl_task_queue *q, void **item)
 {
-	struct wgetx_tq_node *node;
+	struct edwl_tq_node *node;
 
 	if (!q || !item)
 		return -1;
 
-	wgetx_mutex_lock(q->mtx);
+	edwl_mutex_lock(q->mtx);
 	if (q->count == 0) {
-		wgetx_mutex_unlock(q->mtx);
+		edwl_mutex_unlock(q->mtx);
 		return 0;
 	}
 	node = q->head;
@@ -144,43 +144,43 @@ int wgetx_tq_try_pop(struct wgetx_task_queue *q, void **item)
 	if (!q->head)
 		q->tail = NULL;
 	q->count--;
-	wgetx_mutex_unlock(q->mtx);
+	edwl_mutex_unlock(q->mtx);
 
 	*item = node->item;
 	free(node);
 	return 1;
 }
 
-size_t wgetx_tq_size(struct wgetx_task_queue *q)
+size_t edwl_tq_size(struct edwl_task_queue *q)
 {
 	size_t n;
 
 	if (!q)
 		return 0;
-	wgetx_mutex_lock(q->mtx);
+	edwl_mutex_lock(q->mtx);
 	n = q->count;
-	wgetx_mutex_unlock(q->mtx);
+	edwl_mutex_unlock(q->mtx);
 	return n;
 }
 
-void wgetx_tq_close(struct wgetx_task_queue *q)
+void edwl_tq_close(struct edwl_task_queue *q)
 {
 	if (!q)
 		return;
-	wgetx_mutex_lock(q->mtx);
+	edwl_mutex_lock(q->mtx);
 	q->closed = 1;
-	wgetx_cond_broadcast(q->cond);
-	wgetx_mutex_unlock(q->mtx);
+	edwl_cond_broadcast(q->cond);
+	edwl_mutex_unlock(q->mtx);
 }
 
-int wgetx_tq_closed(struct wgetx_task_queue *q)
+int edwl_tq_closed(struct edwl_task_queue *q)
 {
 	int closed;
 
 	if (!q)
 		return 1;
-	wgetx_mutex_lock(q->mtx);
+	edwl_mutex_lock(q->mtx);
 	closed = q->closed;
-	wgetx_mutex_unlock(q->mtx);
+	edwl_mutex_unlock(q->mtx);
 	return closed;
 }

@@ -48,7 +48,7 @@ static int parse_port(const char *s, size_t len, int *out)
 	return 0;
 }
 
-int wgetx_url_default_port(const char *scheme)
+int edwl_url_default_port(const char *scheme)
 {
 	if (!scheme)
 		return 0;
@@ -59,7 +59,7 @@ int wgetx_url_default_port(const char *scheme)
 	return 0;
 }
 
-static int fill_host(struct wgetx_url *out, const char *begin, const char *end)
+static int fill_host(struct edwl_url *out, const char *begin, const char *end)
 {
 	const char *host_begin = begin;
 	const char *host_end = end;
@@ -98,10 +98,10 @@ static int fill_host(struct wgetx_url *out, const char *begin, const char *end)
 	return 0;
 }
 
-static int fill_host_header(struct wgetx_url *out)
+static int fill_host_header(struct edwl_url *out)
 {
 	int is_v6 = strchr(out->host, ':') != NULL;
-	int def_port = wgetx_url_default_port(out->scheme);
+	int def_port = edwl_url_default_port(out->scheme);
 	int same_port = (out->port == def_port);
 	int n;
 
@@ -125,7 +125,7 @@ static int fill_host_header(struct wgetx_url *out)
 	return 0;
 }
 
-static int fill_path(struct wgetx_url *out, const char *start)
+static int fill_path(struct edwl_url *out, const char *start)
 {
 	size_t len = strcspn(start, "#");
 
@@ -146,7 +146,7 @@ static int fill_path(struct wgetx_url *out, const char *start)
 	return 0;
 }
 
-int wgetx_url_parse(const char *url, struct wgetx_url *out)
+int edwl_url_parse(const char *url, struct edwl_url *out)
 {
 	const char *sep;
 	const char *authority;
@@ -184,7 +184,7 @@ int wgetx_url_parse(const char *url, struct wgetx_url *out)
 	if (fill_host(out, host_begin, authority_end) != 0)
 		return -1;
 	if (out->port == 0)
-		out->port = wgetx_url_default_port(out->scheme);
+		out->port = edwl_url_default_port(out->scheme);
 	if (out->port <= 0)
 		return -1;
 
@@ -196,7 +196,7 @@ int wgetx_url_parse(const char *url, struct wgetx_url *out)
 	return 0;
 }
 
-int wgetx_url_is_absolute(const char *url)
+int edwl_url_is_absolute(const char *url)
 {
 	const char *sep;
 
@@ -232,7 +232,7 @@ static int percent_decode(const char *in, char *out, size_t out_size)
 	return 0;
 }
 
-int wgetx_url_sanitize_filename(const char *in, char *out, size_t out_size)
+int edwl_url_sanitize_filename(const char *in, char *out, size_t out_size)
 {
 	size_t i = 0;
 	size_t oi = 0;
@@ -259,9 +259,9 @@ int wgetx_url_sanitize_filename(const char *in, char *out, size_t out_size)
 	return 0;
 }
 
-int wgetx_url_guess_filename(const char *url, char *out, size_t out_size)
+int edwl_url_guess_filename(const char *url, char *out, size_t out_size)
 {
-	struct wgetx_url parsed;
+	struct edwl_url parsed;
 	char decoded[512];
 	const char *path;
 	const char *query;
@@ -272,7 +272,7 @@ int wgetx_url_guess_filename(const char *url, char *out, size_t out_size)
 		return -1;
 	out[0] = '\0';
 
-	if (wgetx_url_parse(url, &parsed) != 0)
+	if (edwl_url_parse(url, &parsed) != 0)
 		return -1;
 
 	/* 路径里带查询串的话，文件名只取 '?' 前面那段 */
@@ -286,7 +286,7 @@ int wgetx_url_guess_filename(const char *url, char *out, size_t out_size)
 	last = strrchr(decoded, '/');
 	path = last ? last + 1 : decoded;
 	if (*path == '\0') {
-		if (wgetx_url_sanitize_filename("index.html", out, out_size) !=
+		if (edwl_url_sanitize_filename("index.html", out, out_size) !=
 		    0)
 			return -1;
 		return 0;
@@ -294,15 +294,15 @@ int wgetx_url_guess_filename(const char *url, char *out, size_t out_size)
 
 	if (percent_decode(path, decoded, sizeof(decoded)) != 0)
 		return -1;
-	if (wgetx_url_sanitize_filename(decoded, out, out_size) != 0)
+	if (edwl_url_sanitize_filename(decoded, out, out_size) != 0)
 		return -1;
 	if (out[0] == '\0')
-		return wgetx_url_sanitize_filename("index.html", out, out_size);
+		return edwl_url_sanitize_filename("index.html", out, out_size);
 	return 0;
 }
 
-int wgetx_url_format_range(uint64_t begin, uint64_t end, char *out,
-			   size_t out_size)
+int edwl_url_format_range(uint64_t begin, uint64_t end, char *out,
+			  size_t out_size)
 {
 	int n;
 
@@ -324,8 +324,8 @@ static const char *skip_spaces(const char *p)
 	return p;
 }
 
-int wgetx_url_parse_content_range(const char *value, uint64_t *begin,
-				  uint64_t *end, uint64_t *total)
+int edwl_url_parse_content_range(const char *value, uint64_t *begin,
+				 uint64_t *end, uint64_t *total)
 {
 	const char *p;
 	char *ep;

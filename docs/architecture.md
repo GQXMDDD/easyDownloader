@@ -32,7 +32,7 @@
 
 ```
 main
- └─ wgetx_download_run
+ └─ edwl_download_run
      ├─ 1. resolve_output        URL → 输出文件名（+ .edwl 边车路径）
      ├─ 2. probe_any             逐个源发 Range: bytes=0-0
      │      └─ 得到 total / range_supported / ETag / Last-Modified
@@ -57,7 +57,7 @@ main
 ### 分片（`core/segment.h`）
 
 ```c
-struct wgetx_segment {
+struct edwl_segment {
         uint64_t index;
         uint64_t begin;    /* 闭区间起点 */
         uint64_t end;      /* 闭区间终点 */
@@ -95,9 +95,9 @@ piece <begin> <end> <pos>      ← 每片一行
 |---|---|
 | 各片 `pos` / `state` / `attempts` | `dl_state.mtx`（每次写盘后加锁更新） |
 | `single_done` | 同上 |
-| 任务队列 | `wgetx_task_queue` 内部自己的 mutex + cond |
-| 未完成计数 | `wgetx_thread_pool` 内部 mutex + cond |
-| 源健康度 | `wgetx_sources` 内部 mutex |
+| 任务队列 | `edwl_task_queue` 内部自己的 mutex + cond |
+| 未完成计数 | `edwl_thread_pool` 内部 mutex + cond |
+| 源健康度 | `edwl_sources` 内部 mutex |
 | 进度快照 | 在 `mtx` 内取一份拷贝，出了锁再画 |
 
 `outstanding` 计数（而不是"队列为空"）才是 `wait_idle()` 的依据：worker 可能在
@@ -111,9 +111,9 @@ piece <begin> <end> <pos>      ← 每片一行
   轮转跳过冷却中的源。
 - **服务器无视 Range**（本该 206 却回 200）：立即置 `fatal`，停止并报错——
   这种响应下按分片偏移写盘会直接写坏文件。
-- **连接提前断开**（`WGETX_HTTP_ERR_SHORT`）：不算致命，`pos` 已前进，
+- **连接提前断开**（`EDWL_HTTP_ERR_SHORT`）：不算致命，`pos` 已前进，
   重试会从断点继续，最终拼出完整文件。
-- **本地写失败**：`WGETX_HTTP_ERR_LOCAL_IO`，按普通失败重试一次后放弃。
+- **本地写失败**：`EDWL_HTTP_ERR_LOCAL_IO`，按普通失败重试一次后放弃。
 - **401/403/404**：探测阶段直接换源，不做无意义重试。
 
 ## 6. 中断与续传
@@ -135,7 +135,6 @@ piece <begin> <end> <pos>      ← 每片一行
 
 | 位置 | 原设计写的 | 实际做法 | 原因 |
 |---|---|---|---|
-| 头文件目录 | 正文同时出现 `include/wgetx/...` 与 `edwl/platform/platform.h` | 统一用 `include/edwl/`，符号前缀仍是 `wgetx_` | 取"依赖规则"里明确写死的 `edwl/platform/platform.h` |
 | Win32 `pwrite` | "句柄不必以 `FILE_FLAG_OVERLAPPED` 打开" | **必须**带 `FILE_FLAG_OVERLAPPED` | 同步句柄会忽略 `OVERLAPPED.Offset`、改用内部文件指针，多线程共用必然互相踩；实测 `ERROR_HANDLE_EOF` 也只在重叠句柄上出现 |
 | `file_open_write` | `CreateFileA(..., CREATE_ALWAYS, ...)` | `OPEN_ALWAYS`（POSIX 侧 `O_CREAT` 不带 `O_TRUNC`） | `CREATE_ALWAYS` 会把续传所需的已下载内容清掉；长度统一由 `file_truncate` 显式设定 |
 | 平台 API | 只列了 5 个文件 IO 函数 | 增加 `file_open_read` / `file_size` / `cond_timedwait` / `thread_current_id` / 中断标志 | 校验阶段需要只读句柄；其它是线程池与 Ctrl-C 的必要补充 |
@@ -155,5 +154,5 @@ main thread                      monitor thread          worker × N
     └─ 全部完成 ←──────────────────────┴─────────────────────┘
 ```
 
-worker 之间不共享 libcurl 句柄：每次传输新建一个 `wgetx_http`，用完销毁。
+worker 之间不共享 libcurl 句柄：每次传输新建一个 `edwl_http`，用完销毁。
 好处是故障隔离彻底（一个连接炸了不影响别的），代价是每片一次 TCP/TLS 握手。

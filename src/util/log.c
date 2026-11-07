@@ -11,44 +11,44 @@
 #include <edwl/platform/platform.h>
 #include <edwl/util/log.h>
 
-static int log_threshold = WGETX_LOG_INFO;
+static int log_threshold = EDWL_LOG_INFO;
 
-void wgetx_log_init(int level)
+void edwl_log_init(int level)
 {
-	if (level < WGETX_LOG_ERROR)
-		level = WGETX_LOG_ERROR;
-	if (level > WGETX_LOG_DEBUG)
-		level = WGETX_LOG_DEBUG;
+	if (level < EDWL_LOG_ERROR)
+		level = EDWL_LOG_ERROR;
+	if (level > EDWL_LOG_DEBUG)
+		level = EDWL_LOG_DEBUG;
 	log_threshold = level;
 }
 
-void wgetx_log_shutdown(void)
+void edwl_log_shutdown(void)
 {
-	log_threshold = WGETX_LOG_ERROR;
+	log_threshold = EDWL_LOG_ERROR;
 }
 
-int wgetx_log_threshold(void)
+int edwl_log_threshold(void)
 {
 	return log_threshold;
 }
 
-const char *wgetx_log_level_name(int level)
+const char *edwl_log_level_name(int level)
 {
 	switch (level) {
-	case WGETX_LOG_ERROR:
+	case EDWL_LOG_ERROR:
 		return "error";
-	case WGETX_LOG_WARN:
+	case EDWL_LOG_WARN:
 		return "warn";
-	case WGETX_LOG_INFO:
+	case EDWL_LOG_INFO:
 		return "info";
-	case WGETX_LOG_DEBUG:
+	case EDWL_LOG_DEBUG:
 		return "debug";
 	default:
 		return "log";
 	}
 }
 
-void wgetx_log_msg(int level, const char *fmt, ...)
+void edwl_log_msg(int level, const char *fmt, ...)
 {
 	char body[512];
 	char line[600];
@@ -63,11 +63,11 @@ void wgetx_log_msg(int level, const char *fmt, ...)
 	va_end(ap);
 
 	n = snprintf(line, sizeof(line), "edwl: %s: %s\n",
-		     wgetx_log_level_name(level), body);
+		     edwl_log_level_name(level), body);
 	if (n < 0)
 		return;
 	if ((size_t)n >= sizeof(line))
 		line[sizeof(line) - 2] = '\n';
 
-	wgetx_console_write_err(line);
+	edwl_console_write_err(line);
 }

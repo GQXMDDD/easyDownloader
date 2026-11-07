@@ -10,8 +10,8 @@
 
 #include <edwl/core/segment.h>
 
-uint64_t wgetx_segment_piece_size(uint64_t total, size_t conns,
-				  uint64_t min_piece, uint64_t max_piece)
+uint64_t edwl_segment_piece_size(uint64_t total, size_t conns,
+				 uint64_t min_piece, uint64_t max_piece)
 {
 	uint64_t want;
 
@@ -36,10 +36,10 @@ uint64_t wgetx_segment_piece_size(uint64_t total, size_t conns,
 	return want;
 }
 
-int wgetx_segment_map_init(struct wgetx_segment_map *m, uint64_t total,
-			   uint64_t piece_size, size_t max_pieces)
+int edwl_segment_map_init(struct edwl_segment_map *m, uint64_t total,
+			  uint64_t piece_size, size_t max_pieces)
 {
-	struct wgetx_segment *segs;
+	struct edwl_segment *segs;
 	uint64_t begin = 0;
 	uint64_t span;
 	size_t count;
@@ -80,7 +80,7 @@ int wgetx_segment_map_init(struct wgetx_segment_map *m, uint64_t total,
 		segs[i].begin = begin;
 		segs[i].end = end;
 		segs[i].pos = begin;
-		segs[i].state = WGETX_SEG_PENDING;
+		segs[i].state = EDWL_SEG_PENDING;
 		segs[i].attempts = 0;
 		begin = end + 1;
 	}
@@ -90,7 +90,7 @@ int wgetx_segment_map_init(struct wgetx_segment_map *m, uint64_t total,
 	return 0;
 }
 
-void wgetx_segment_map_free(struct wgetx_segment_map *m)
+void edwl_segment_map_free(struct edwl_segment_map *m)
 {
 	if (!m)
 		return;
@@ -100,7 +100,7 @@ void wgetx_segment_map_free(struct wgetx_segment_map *m)
 	m->total = 0;
 }
 
-uint64_t wgetx_segment_remaining(const struct wgetx_segment *s)
+uint64_t edwl_segment_remaining(const struct edwl_segment *s)
 {
 	if (!s)
 		return 0;
@@ -109,14 +109,14 @@ uint64_t wgetx_segment_remaining(const struct wgetx_segment *s)
 	return s->end - s->pos + 1;
 }
 
-int wgetx_segment_complete(const struct wgetx_segment *s)
+int edwl_segment_complete(const struct edwl_segment *s)
 {
 	if (!s)
 		return 0;
 	return s->pos > s->end;
 }
 
-uint64_t wgetx_segment_map_done(const struct wgetx_segment_map *m)
+uint64_t edwl_segment_map_done(const struct edwl_segment_map *m)
 {
 	uint64_t done = 0;
 	size_t i;
@@ -128,7 +128,7 @@ uint64_t wgetx_segment_map_done(const struct wgetx_segment_map *m)
 	return done;
 }
 
-size_t wgetx_segment_map_done_count(const struct wgetx_segment_map *m)
+size_t edwl_segment_map_done_count(const struct edwl_segment_map *m)
 {
 	size_t n = 0;
 	size_t i;
@@ -136,33 +136,33 @@ size_t wgetx_segment_map_done_count(const struct wgetx_segment_map *m)
 	if (!m || !m->segs)
 		return 0;
 	for (i = 0; i < m->count; i++) {
-		if (m->segs[i].state == WGETX_SEG_DONE)
+		if (m->segs[i].state == EDWL_SEG_DONE)
 			n++;
 	}
 	return n;
 }
 
-int wgetx_segment_map_all_done(const struct wgetx_segment_map *m)
+int edwl_segment_map_all_done(const struct edwl_segment_map *m)
 {
 	size_t i;
 
 	if (!m || !m->segs)
 		return 0;
 	for (i = 0; i < m->count; i++) {
-		if (!wgetx_segment_complete(&m->segs[i]))
+		if (!edwl_segment_complete(&m->segs[i]))
 			return 0;
 	}
 	return 1;
 }
 
-void wgetx_segment_map_release_active(struct wgetx_segment_map *m)
+void edwl_segment_map_release_active(struct edwl_segment_map *m)
 {
 	size_t i;
 
 	if (!m || !m->segs)
 		return;
 	for (i = 0; i < m->count; i++) {
-		if (m->segs[i].state == WGETX_SEG_ACTIVE)
-			m->segs[i].state = WGETX_SEG_PENDING;
+		if (m->segs[i].state == EDWL_SEG_ACTIVE)
+			m->segs[i].state = EDWL_SEG_PENDING;
 	}
 }

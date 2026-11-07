@@ -16,12 +16,12 @@
 
 #include <edwl/platform/platform.h>
 
-static HANDLE as_handle(wgetx_file_t fd)
+static HANDLE as_handle(edwl_file_t fd)
 {
 	return (HANDLE)(uintptr_t)fd;
 }
 
-int wgetx_file_open_write(const char *path, wgetx_file_t *out)
+int edwl_file_open_write(const char *path, edwl_file_t *out)
 {
 	HANDLE h;
 
@@ -34,11 +34,11 @@ int wgetx_file_open_write(const char *path, wgetx_file_t *out)
 	if (h == INVALID_HANDLE_VALUE)
 		return -1;
 
-	*out = (wgetx_file_t)(intptr_t)(uintptr_t)h;
+	*out = (edwl_file_t)(intptr_t)(uintptr_t)h;
 	return 0;
 }
 
-int wgetx_file_open_read(const char *path, wgetx_file_t *out)
+int edwl_file_open_read(const char *path, edwl_file_t *out)
 {
 	HANDLE h;
 
@@ -51,11 +51,11 @@ int wgetx_file_open_read(const char *path, wgetx_file_t *out)
 	if (h == INVALID_HANDLE_VALUE)
 		return -1;
 
-	*out = (wgetx_file_t)(intptr_t)(uintptr_t)h;
+	*out = (edwl_file_t)(intptr_t)(uintptr_t)h;
 	return 0;
 }
 
-int wgetx_file_truncate(wgetx_file_t fd, uint64_t size)
+int edwl_file_truncate(edwl_file_t fd, uint64_t size)
 {
 	HANDLE h = as_handle(fd);
 	LARGE_INTEGER li;
@@ -71,7 +71,7 @@ int wgetx_file_truncate(wgetx_file_t fd, uint64_t size)
 	return 0;
 }
 
-int wgetx_file_size(wgetx_file_t fd, uint64_t *out)
+int edwl_file_size(edwl_file_t fd, uint64_t *out)
 {
 	HANDLE h = as_handle(fd);
 	LARGE_INTEGER li;
@@ -91,8 +91,8 @@ static void set_offset(OVERLAPPED *ov, uint64_t offset)
 	ov->OffsetHigh = (DWORD)((offset >> 32) & 0xFFFFFFFFULL);
 }
 
-int64_t wgetx_file_pwrite(wgetx_file_t fd, const void *buf, size_t count,
-			  uint64_t offset)
+int64_t edwl_file_pwrite(edwl_file_t fd, const void *buf, size_t count,
+			 uint64_t offset)
 {
 	HANDLE h = as_handle(fd);
 	OVERLAPPED ov;
@@ -111,8 +111,8 @@ int64_t wgetx_file_pwrite(wgetx_file_t fd, const void *buf, size_t count,
 	return (int64_t)written;
 }
 
-int64_t wgetx_file_pread(wgetx_file_t fd, void *buf, size_t count,
-			 uint64_t offset)
+int64_t edwl_file_pread(edwl_file_t fd, void *buf, size_t count,
+			uint64_t offset)
 {
 	HANDLE h = as_handle(fd);
 	OVERLAPPED ov;
@@ -144,7 +144,7 @@ int64_t wgetx_file_pread(wgetx_file_t fd, void *buf, size_t count,
 	return (int64_t)got;
 }
 
-int wgetx_file_close(wgetx_file_t fd)
+int edwl_file_close(edwl_file_t fd)
 {
 	if (fd < 0)
 		return -1;

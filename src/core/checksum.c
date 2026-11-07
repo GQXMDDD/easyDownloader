@@ -185,7 +185,7 @@ static void to_hex(const unsigned char *in, size_t len, char *out)
 	out[len * 2] = '\0';
 }
 
-void wgetx_sha256_buf(const void *data, size_t len, char out[WGETX_SHA256_HEX])
+void edwl_sha256_buf(const void *data, size_t len, char out[EDWL_SHA256_HEX])
 {
 	struct sha256 s;
 	unsigned char digest[SHA256_DIGEST];
@@ -197,30 +197,30 @@ void wgetx_sha256_buf(const void *data, size_t len, char out[WGETX_SHA256_HEX])
 	to_hex(digest, sizeof(digest), out);
 }
 
-int wgetx_sha256_file(const char *path, char out[WGETX_SHA256_HEX])
+int edwl_sha256_file(const char *path, char out[EDWL_SHA256_HEX])
 {
 	struct sha256 s;
 	unsigned char digest[SHA256_DIGEST];
 	unsigned char *chunk;
-	wgetx_file_t fd;
+	edwl_file_t fd;
 	uint64_t offset = 0;
 	int rc = -1;
 
 	if (!path || !out)
 		return -1;
-	if (wgetx_file_open_read(path, &fd) != 0)
+	if (edwl_file_open_read(path, &fd) != 0)
 		return -1;
 
 	chunk = malloc(SHA256_BLOCK * 16);
 	if (!chunk) {
-		wgetx_file_close(fd);
+		edwl_file_close(fd);
 		return -1;
 	}
 
 	sha256_init(&s);
 	for (;;) {
 		int64_t n =
-		    wgetx_file_pread(fd, chunk, SHA256_BLOCK * 16, offset);
+		    edwl_file_pread(fd, chunk, SHA256_BLOCK * 16, offset);
 
 		if (n < 0)
 			goto out;
@@ -236,7 +236,7 @@ int wgetx_sha256_file(const char *path, char out[WGETX_SHA256_HEX])
 
 out:
 	free(chunk);
-	wgetx_file_close(fd);
+	edwl_file_close(fd);
 	return rc;
 }
 
@@ -252,7 +252,7 @@ static int hex_equal_ci(const char *a, const char *b, size_t n)
 	return 1;
 }
 
-int wgetx_hash_equals(const char *a, const char *b)
+int edwl_hash_equals(const char *a, const char *b)
 {
 	size_t la, lb;
 
@@ -274,7 +274,7 @@ int wgetx_hash_equals(const char *a, const char *b)
 	return hex_equal_ci(a, b, 64);
 }
 
-int wgetx_hash_is_valid(const char *hex)
+int edwl_hash_is_valid(const char *hex)
 {
 	size_t i;
 

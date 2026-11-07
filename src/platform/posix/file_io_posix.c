@@ -12,7 +12,7 @@
 
 #include <edwl/platform/platform.h>
 
-int wgetx_file_open_write(const char *path, wgetx_file_t *out)
+int edwl_file_open_write(const char *path, edwl_file_t *out)
 {
 	int fd;
 
@@ -21,17 +21,17 @@ int wgetx_file_open_write(const char *path, wgetx_file_t *out)
 
 	/*
 	 * 注意：这里刻意不带 O_TRUNC。断点续传要保留老内容，
-	 * 最终长度由 wgetx_file_truncate() 统一设定。
+	 * 最终长度由 edwl_file_truncate() 统一设定。
 	 */
 	fd = open(path, O_WRONLY | O_CREAT, 0644);
 	if (fd < 0)
 		return -1;
 
-	*out = (wgetx_file_t)fd;
+	*out = (edwl_file_t)fd;
 	return 0;
 }
 
-int wgetx_file_open_read(const char *path, wgetx_file_t *out)
+int edwl_file_open_read(const char *path, edwl_file_t *out)
 {
 	int fd;
 
@@ -40,11 +40,11 @@ int wgetx_file_open_read(const char *path, wgetx_file_t *out)
 	fd = open(path, O_RDONLY);
 	if (fd < 0)
 		return -1;
-	*out = (wgetx_file_t)fd;
+	*out = (edwl_file_t)fd;
 	return 0;
 }
 
-int wgetx_file_truncate(wgetx_file_t fd, uint64_t size)
+int edwl_file_truncate(edwl_file_t fd, uint64_t size)
 {
 	if (fd < 0)
 		return -1;
@@ -53,7 +53,7 @@ int wgetx_file_truncate(wgetx_file_t fd, uint64_t size)
 	return 0;
 }
 
-int wgetx_file_size(wgetx_file_t fd, uint64_t *out)
+int edwl_file_size(edwl_file_t fd, uint64_t *out)
 {
 	struct stat st;
 
@@ -65,8 +65,8 @@ int wgetx_file_size(wgetx_file_t fd, uint64_t *out)
 	return 0;
 }
 
-int64_t wgetx_file_pwrite(wgetx_file_t fd, const void *buf, size_t count,
-			  uint64_t offset)
+int64_t edwl_file_pwrite(edwl_file_t fd, const void *buf, size_t count,
+			 uint64_t offset)
 {
 	ssize_t n;
 
@@ -81,8 +81,8 @@ int64_t wgetx_file_pwrite(wgetx_file_t fd, const void *buf, size_t count,
 	return (int64_t)n;
 }
 
-int64_t wgetx_file_pread(wgetx_file_t fd, void *buf, size_t count,
-			 uint64_t offset)
+int64_t edwl_file_pread(edwl_file_t fd, void *buf, size_t count,
+			uint64_t offset)
 {
 	ssize_t n;
 
@@ -97,7 +97,7 @@ int64_t wgetx_file_pread(wgetx_file_t fd, void *buf, size_t count,
 	return (int64_t)n;
 }
 
-int wgetx_file_close(wgetx_file_t fd)
+int edwl_file_close(edwl_file_t fd)
 {
 	if (fd < 0)
 		return -1;

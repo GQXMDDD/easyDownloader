@@ -11,59 +11,59 @@
 #include <edwl/core/thread_pool.h>
 #include <edwl/platform/platform.h>
 
-struct wgetx_thread_pool {
-	struct wgetx_task_queue *queue;
-	wgetx_pool_job_fn fn;
+struct edwl_thread_pool {
+	struct edwl_task_queue *queue;
+	edwl_pool_job_fn fn;
 	void *ctx;
 
-	struct wgetx_thread **threads;
+	struct edwl_thread **threads;
 	size_t workers;
 
-	struct wgetx_mutex *mtx;
-	struct wgetx_cond *cond;
+	struct edwl_mutex *mtx;
+	struct edwl_cond *cond;
 	size_t outstanding;
 	int stopping;
 };
 
 static void *worker_main(void *arg)
 {
-	struct wgetx_thread_pool *p = arg;
+	struct edwl_thread_pool *p = arg;
 	void *job;
 
-	while (wgetx_tq_pop(p->queue, &job) == 0) {
+	while (edwl_tq_pop(p->queue, &job) == 0) {
 		p->fn(p->ctx, job);
-		wgetx_mutex_lock(p->mtx);
+		edwl_mutex_lock(p->mtx);
 		if (p->outstanding > 0)
 			p->outstanding--;
 		if (p->outstanding == 0)
-			wgetx_cond_broadcast(p->cond);
-		wgetx_mutex_unlock(p->mtx);
+			edwl_cond_broadcast(p->cond);
+		edwl_mutex_unlock(p->mtx);
 	}
 	return NULL;
 }
 
-static void destroy_partial(struct wgetx_thread_pool *p, size_t started)
+static void destroy_partial(struct edwl_thread_pool *p, size_t started)
 {
 	size_t i;
 
 	if (p->queue)
-		wgetx_tq_close(p->queue);
+		edwl_tq_close(p->queue);
 	for (i = 0; i < started; i++)
-		wgetx_thread_join(p->threads[i]);
+		edwl_thread_join(p->threads[i]);
 	free(p->threads);
 	if (p->cond)
-		wgetx_cond_destroy(p->cond);
+		edwl_cond_destroy(p->cond);
 	if (p->mtx)
-		wgetx_mutex_destroy(p->mtx);
+		edwl_mutex_destroy(p->mtx);
 	if (p->queue)
-		wgetx_tq_destroy(p->queue);
+		edwl_tq_destroy(p->queue);
 	free(p);
 }
 
-int wgetx_pool_create(struct wgetx_thread_pool **out, size_t workers,
-		      wgetx_pool_job_fn fn, void *ctx)
+int edwl_pool_create(struct edwl_thread_pool **out, size_t workers,
+		     edwl_pool_job_fn fn, void *ctx)
 {
-	struct wgetx_thread_pool *p;
+	struct edwl_thread_pool *p;
 	size_t i = 0;
 
 	if (!out || !fn || workers == 0)
@@ -77,11 +77,11 @@ int wgetx_pool_create(struct wgetx_thread_pool **out, size_t workers,
 	p->ctx = ctx;
 	p->workers = workers;
 
-	if (wgetx_tq_create(&p->queue) != 0)
+	if (edwl_tq_create(&p->queue) != 0)
 		goto fail;
-	if (wgetx_mutex_init(&p->mtx) != 0)
+	if (edwl_mutex_init(&p->mtx) != 0)
 		goto fail;
-	if (wgetx_cond_init(&p->cond) != 0)
+	if (edwl_cond_init(&p->cond) != 0)
 		goto fail;
 
 	p->threads = calloc(workers, sizeof(*p->threads));
@@ -89,7 +89,7 @@ int wgetx_pool_create(struct wgetx_thread_pool **out, size_t workers,
 		goto fail;
 
 	for (i = 0; i < workers; i++) {
-		if (wgetx_thread_create(&p->threads[i], worker_main, p) != 0)
+		if (edwl_thread_create(&p->threads[i], worker_main, p) != 0)
 			goto fail;
 	}
 
@@ -101,66 +101,66 @@ fail:
 	return -1;
 }
 
-int wgetx_pool_submit(struct wgetx_thread_pool *p, void *job)
+int edwl_pool_submit(struct edwl_thread_pool *p, void *job)
 {
 	if (!p)
 		return -1;
 
-	wgetx_mutex_lock(p->mtx);
+	edwl_mutex_lock(p->mtx);
 	if (p->stopping) {
-		wgetx_mutex_unlock(p->mtx);
+		edwl_mutex_unlock(p->mtx);
 		return -1;
 	}
 	p->outstanding++;
-	wgetx_mutex_unlock(p->mtx);
+	edwl_mutex_unlock(p->mtx);
 
-	if (wgetx_tq_push(p->queue, job) != 0) {
-		wgetx_mutex_lock(p->mtx);
+	if (edwl_tq_push(p->queue, job) != 0) {
+		edwl_mutex_lock(p->mtx);
 		if (p->outstanding > 0)
 			p->outstanding--;
-		wgetx_mutex_unlock(p->mtx);
+		edwl_mutex_unlock(p->mtx);
 		return -1;
 	}
 	return 0;
 }
 
-int wgetx_pool_wait_idle(struct wgetx_thread_pool *p)
+int edwl_pool_wait_idle(struct edwl_thread_pool *p)
 {
 	if (!p)
 		return -1;
 
-	wgetx_mutex_lock(p->mtx);
+	edwl_mutex_lock(p->mtx);
 	while (p->outstanding > 0)
-		wgetx_cond_wait(p->cond, p->mtx);
-	wgetx_mutex_unlock(p->mtx);
+		edwl_cond_wait(p->cond, p->mtx);
+	edwl_mutex_unlock(p->mtx);
 	return 0;
 }
 
-size_t wgetx_pool_outstanding(struct wgetx_thread_pool *p)
+size_t edwl_pool_outstanding(struct edwl_thread_pool *p)
 {
 	size_t n;
 
 	if (!p)
 		return 0;
-	wgetx_mutex_lock(p->mtx);
+	edwl_mutex_lock(p->mtx);
 	n = p->outstanding;
-	wgetx_mutex_unlock(p->mtx);
+	edwl_mutex_unlock(p->mtx);
 	return n;
 }
 
-size_t wgetx_pool_workers(struct wgetx_thread_pool *p)
+size_t edwl_pool_workers(struct edwl_thread_pool *p)
 {
 	return p ? p->workers : 0;
 }
 
-void wgetx_pool_destroy(struct wgetx_thread_pool *p)
+void edwl_pool_destroy(struct edwl_thread_pool *p)
 {
 	if (!p)
 		return;
 
-	wgetx_mutex_lock(p->mtx);
+	edwl_mutex_lock(p->mtx);
 	p->stopping = 1;
-	wgetx_mutex_unlock(p->mtx);
+	edwl_mutex_unlock(p->mtx);
 
 	destroy_partial(p, p->workers);
 }

@@ -6,7 +6,7 @@
  *   get_range  —— 拉一个闭区间，按绝对偏移交给 sink 落盘
  *   get_all    —— 整文件顺序拉（服务器不支持 Range 时的回退）
  *
- * 一个 wgetx_http 对应一个 worker，内部就一个 CURL easy handle。
+ * 一个 edwl_http 对应一个 worker，内部就一个 CURL easy handle。
  * 顺带说明：HTTP 层不认识"分片"，它只知道 begin/end 和 offset。
  */
 #include <ctype.h>
@@ -20,14 +20,14 @@
 #include <edwl/platform/platform.h>
 #include <edwl/util/url.h>
 
-#define WGETX_USER_AGENT                                                       \
+#define EDWL_USER_AGENT                                                        \
 	"edwl/"                                                                \
 	"0.1.0"
 
-struct wgetx_http {
+struct edwl_http {
 	CURL *easy;
-	char error[WGETX_HTTP_ERR_LEN];
-	struct wgetx_http_opts opts;
+	char error[EDWL_HTTP_ERR_LEN];
+	struct edwl_http_opts opts;
 };
 
 static int curl_ready;
@@ -35,7 +35,7 @@ static char version_text[256];
 
 /* ---------- 小工具 ---------- */
 
-static void set_error(struct wgetx_http *h, const char *text)
+static void set_error(struct edwl_http *h, const char *text)
 {
 	if (!h || !text)
 		return;
@@ -88,7 +88,7 @@ static void strip_eol(char *s)
 
 /* ---------- 生命周期 ---------- */
 
-int wgetx_http_global_init(void)
+int edwl_http_global_init(void)
 {
 	if (curl_ready)
 		return 0;
@@ -99,7 +99,7 @@ int wgetx_http_global_init(void)
 	return 0;
 }
 
-void wgetx_http_global_fini(void)
+void edwl_http_global_fini(void)
 {
 	if (!curl_ready)
 		return;
@@ -107,7 +107,7 @@ void wgetx_http_global_fini(void)
 	curl_ready = 0;
 }
 
-const char *wgetx_http_version(void)
+const char *edwl_http_version(void)
 {
 	/* 允许在 global_init 之前调用（--version 就是这种情况） */
 	if (!version_text[0])
@@ -116,16 +116,16 @@ const char *wgetx_http_version(void)
 	return version_text;
 }
 
-const char *wgetx_http_error(struct wgetx_http *h)
+const char *edwl_http_error(struct edwl_http *h)
 {
 	if (!h)
 		return "no handle";
 	return h->error[0] ? h->error : "unknown error";
 }
 
-int wgetx_http_open(struct wgetx_http **out, const struct wgetx_http_opts *opts)
+int edwl_http_open(struct edwl_http **out, const struct edwl_http_opts *opts)
 {
-	struct wgetx_http *h;
+	struct edwl_http *h;
 
 	if (!out)
 		return -1;
@@ -145,7 +145,7 @@ int wgetx_http_open(struct wgetx_http **out, const struct wgetx_http_opts *opts)
 	return 0;
 }
 
-void wgetx_http_close(struct wgetx_http *h)
+void edwl_http_close(struct edwl_http *h)
 {
 	if (!h)
 		return;
@@ -154,7 +154,7 @@ void wgetx_http_close(struct wgetx_http *h)
 	free(h);
 }
 
-static CURL *ensure_easy(struct wgetx_http *h)
+static CURL *ensure_easy(struct edwl_http *h)
 {
 	if (h->easy)
 		return h->easy;
@@ -162,10 +162,10 @@ static CURL *ensure_easy(struct wgetx_http *h)
 	return h->easy;
 }
 
-static void setup_common(struct wgetx_http *h, const char *url,
+static void setup_common(struct edwl_http *h, const char *url,
 			 struct curl_slist *hdrs)
 {
-	const struct wgetx_http_opts *o = &h->opts;
+	const struct edwl_http_opts *o = &h->opts;
 	CURL *e = h->easy;
 	long connect_ms = 15000;
 	long maxredir = 10;
@@ -181,7 +181,7 @@ static void setup_common(struct wgetx_http *h, const char *url,
 	curl_easy_setopt(e, CURLOPT_MAXREDIRS, maxredir);
 	curl_easy_setopt(e, CURLOPT_NOSIGNAL, 1L);
 	curl_easy_setopt(e, CURLOPT_USERAGENT,
-			 o->user_agent ? o->user_agent : WGETX_USER_AGENT);
+			 o->user_agent ? o->user_agent : EDWL_USER_AGENT);
 	curl_easy_setopt(e, CURLOPT_CONNECTTIMEOUT_MS, connect_ms);
 	curl_easy_setopt(e, CURLOPT_TCP_KEEPALIVE, 1L);
 
@@ -206,7 +206,7 @@ static void setup_common(struct wgetx_http *h, const char *url,
 /* ---------- 探测 ---------- */
 
 struct probe_ctx {
-	struct wgetx_http_info *info;
+	struct edwl_http_info *info;
 };
 
 static size_t discard_write_cb(char *ptr, size_t size, size_t nmemb,
@@ -221,7 +221,7 @@ static size_t probe_header_cb(char *buffer, size_t size, size_t nitems,
 			      void *userdata)
 {
 	struct probe_ctx *ctx = userdata;
-	struct wgetx_http_info *info = ctx->info;
+	struct edwl_http_info *info = ctx->info;
 	size_t len = size * nitems;
 	char line[512];
 	char *colon;
@@ -259,7 +259,7 @@ static size_t probe_header_cb(char *buffer, size_t size, size_t nitems,
 	} else if (ci_prefix(line, "Content-Range")) {
 		uint64_t b = 0, e = 0, total = 0;
 
-		if (wgetx_url_parse_content_range(value, &b, &e, &total) == 0) {
+		if (edwl_url_parse_content_range(value, &b, &e, &total) == 0) {
 			if (total > 0)
 				info->content_length = total;
 			info->range_supported = 1;
@@ -280,18 +280,18 @@ static size_t probe_header_cb(char *buffer, size_t size, size_t nitems,
 	return size * nitems;
 }
 
-int wgetx_http_probe(struct wgetx_http *h, const char *url,
-		     struct wgetx_http_info *info)
+int edwl_http_probe(struct edwl_http *h, const char *url,
+		    struct edwl_http_info *info)
 {
 	struct curl_slist *hdrs = NULL;
 	struct probe_ctx ctx;
 	CURLcode rc;
 	char *effective = NULL;
 	long code = 0;
-	int ret = WGETX_HTTP_OK;
+	int ret = EDWL_HTTP_OK;
 
 	if (!h || !url || !info)
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 
 	memset(info, 0, sizeof(*info));
 	memset(&ctx, 0, sizeof(ctx));
@@ -299,7 +299,7 @@ int wgetx_http_probe(struct wgetx_http *h, const char *url,
 
 	if (ensure_easy(h) == NULL) {
 		set_error(h, "cannot create curl handle");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 	curl_easy_reset(h->easy);
 
@@ -307,7 +307,7 @@ int wgetx_http_probe(struct wgetx_http *h, const char *url,
 	hdrs = curl_slist_append(hdrs, "Range: bytes=0-0");
 	if (!hdrs) {
 		set_error(h, "out of memory");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 
 	setup_common(h, url, hdrs);
@@ -320,11 +320,11 @@ int wgetx_http_probe(struct wgetx_http *h, const char *url,
 	curl_slist_free_all(hdrs);
 
 	if (rc != CURLE_OK) {
-		char msg[WGETX_HTTP_ERR_LEN];
+		char msg[EDWL_HTTP_ERR_LEN];
 
 		snprintf(msg, sizeof(msg), "%s", curl_easy_strerror(rc));
 		set_error(h, msg);
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 
 	curl_easy_getinfo(h->easy, CURLINFO_RESPONSE_CODE, &code);
@@ -340,11 +340,11 @@ int wgetx_http_probe(struct wgetx_http *h, const char *url,
 		info->range_supported = 0;
 
 	if (code != 200 && code != 206) {
-		char msg[WGETX_HTTP_ERR_LEN];
+		char msg[EDWL_HTTP_ERR_LEN];
 
 		snprintf(msg, sizeof(msg), "HTTP %ld", code);
 		set_error(h, msg);
-		ret = WGETX_HTTP_ERR;
+		ret = EDWL_HTTP_ERR;
 	}
 
 	return ret;
@@ -353,7 +353,7 @@ int wgetx_http_probe(struct wgetx_http *h, const char *url,
 /* ---------- 传输 ---------- */
 
 struct fetch_ctx {
-	const struct wgetx_http_sink *sink;
+	const struct edwl_http_sink *sink;
 	uint64_t base; /* 本段在文件里的起点 */
 	uint64_t got;  /* 本次已写入字节 */
 	int io_error;
@@ -390,7 +390,7 @@ static int fetch_progress_cb(void *clientp, curl_off_t dltotal,
 	(void)ultotal;
 	(void)ulnow;
 
-	if (wgetx_interrupt_requested()) {
+	if (edwl_interrupt_requested()) {
 		ctx->stopped = 1;
 		return 1;
 	}
@@ -402,33 +402,33 @@ static int fetch_progress_cb(void *clientp, curl_off_t dltotal,
 	return 0;
 }
 
-static int classify(CURLcode rc, struct fetch_ctx *ctx, struct wgetx_http *h,
+static int classify(CURLcode rc, struct fetch_ctx *ctx, struct edwl_http *h,
 		    long code)
 {
 	if (rc == CURLE_ABORTED_BY_CALLBACK) {
 		set_error(h, ctx->stopped ? "aborted" : "aborted by callback");
-		return WGETX_HTTP_ERR_INTERRUPTED;
+		return EDWL_HTTP_ERR_INTERRUPTED;
 	}
 	if (rc == CURLE_WRITE_ERROR) {
 		set_error(h, ctx->io_error ? "local write failed"
 					   : "transfer write error");
-		return WGETX_HTTP_ERR_LOCAL_IO;
+		return EDWL_HTTP_ERR_LOCAL_IO;
 	}
 	if (rc != CURLE_OK) {
 		set_error(h, curl_easy_strerror(rc));
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 	if (code != 200 && code != 206) {
-		char msg[WGETX_HTTP_ERR_LEN];
+		char msg[EDWL_HTTP_ERR_LEN];
 
 		snprintf(msg, sizeof(msg), "HTTP %ld", code);
 		set_error(h, msg);
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
-	return WGETX_HTTP_OK;
+	return EDWL_HTTP_OK;
 }
 
-static int run_transfer(struct wgetx_http *h, const char *url,
+static int run_transfer(struct edwl_http *h, const char *url,
 			struct curl_slist *hdrs, struct fetch_ctx *ctx,
 			long *code_out)
 {
@@ -447,9 +447,9 @@ static int run_transfer(struct wgetx_http *h, const char *url,
 	return classify(rc, ctx, h, *code_out);
 }
 
-int wgetx_http_get_range(struct wgetx_http *h, const char *url, uint64_t begin,
-			 uint64_t end, const struct wgetx_http_sink *sink,
-			 uint64_t *got)
+int edwl_http_get_range(struct edwl_http *h, const char *url, uint64_t begin,
+			uint64_t end, const struct edwl_http_sink *sink,
+			uint64_t *got)
 {
 	struct curl_slist *hdrs = NULL;
 	struct fetch_ctx ctx;
@@ -460,19 +460,19 @@ int wgetx_http_get_range(struct wgetx_http *h, const char *url, uint64_t begin,
 	int ret;
 
 	if (!h || !url || !sink || !got || !sink->write)
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	if (end < begin)
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 
-	if (wgetx_url_format_range(begin, end, spec, sizeof(spec)) != 0) {
+	if (edwl_url_format_range(begin, end, spec, sizeof(spec)) != 0) {
 		set_error(h, "bad range");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 	snprintf(header, sizeof(header), "Range: %s", spec);
 
 	if (ensure_easy(h) == NULL) {
 		set_error(h, "cannot create curl handle");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 	curl_easy_reset(h->easy);
 
@@ -480,7 +480,7 @@ int wgetx_http_get_range(struct wgetx_http *h, const char *url, uint64_t begin,
 	hdrs = curl_slist_append(hdrs, header);
 	if (!hdrs) {
 		set_error(h, "out of memory");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 
 	memset(&ctx, 0, sizeof(ctx));
@@ -490,32 +490,32 @@ int wgetx_http_get_range(struct wgetx_http *h, const char *url, uint64_t begin,
 	ret = run_transfer(h, url, hdrs, &ctx, &code);
 	curl_slist_free_all(hdrs);
 
-	if (ret != WGETX_HTTP_OK)
+	if (ret != EDWL_HTTP_OK)
 		return ret;
 
 	/* 服务器无视 Range，直接回了整个文件：绝不能按分片偏移落盘 */
 	if (code == 200) {
 		set_error(h, "server ignored Range");
-		return WGETX_HTTP_ERR_RANGE_IGNORED;
+		return EDWL_HTTP_ERR_RANGE_IGNORED;
 	}
 
 	*got = ctx.got;
 	expect = end - begin + 1;
 	if (ctx.got < expect) {
-		char msg[WGETX_HTTP_ERR_LEN];
+		char msg[EDWL_HTTP_ERR_LEN];
 
 		snprintf(msg, sizeof(msg), "short read %llu/%llu",
 			 (unsigned long long)ctx.got,
 			 (unsigned long long)expect);
 		set_error(h, msg);
-		return WGETX_HTTP_ERR_SHORT;
+		return EDWL_HTTP_ERR_SHORT;
 	}
 
-	return WGETX_HTTP_OK;
+	return EDWL_HTTP_OK;
 }
 
-int wgetx_http_get_all(struct wgetx_http *h, const char *url,
-		       const struct wgetx_http_sink *sink, uint64_t *got)
+int edwl_http_get_all(struct edwl_http *h, const char *url,
+		      const struct edwl_http_sink *sink, uint64_t *got)
 {
 	struct curl_slist *hdrs = NULL;
 	struct fetch_ctx ctx;
@@ -523,18 +523,18 @@ int wgetx_http_get_all(struct wgetx_http *h, const char *url,
 	int ret;
 
 	if (!h || !url || !sink || !got || !sink->write)
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 
 	if (ensure_easy(h) == NULL) {
 		set_error(h, "cannot create curl handle");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 	curl_easy_reset(h->easy);
 
 	hdrs = curl_slist_append(hdrs, "Accept-Encoding: identity");
 	if (!hdrs) {
 		set_error(h, "out of memory");
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
 
 	memset(&ctx, 0, sizeof(ctx));
@@ -545,14 +545,14 @@ int wgetx_http_get_all(struct wgetx_http *h, const char *url,
 	curl_slist_free_all(hdrs);
 
 	*got = ctx.got;
-	if (ret != WGETX_HTTP_OK)
+	if (ret != EDWL_HTTP_OK)
 		return ret;
 	if (code != 200) {
-		char msg[WGETX_HTTP_ERR_LEN];
+		char msg[EDWL_HTTP_ERR_LEN];
 
 		snprintf(msg, sizeof(msg), "HTTP %ld", code);
 		set_error(h, msg);
-		return WGETX_HTTP_ERR;
+		return EDWL_HTTP_ERR;
 	}
-	return WGETX_HTTP_OK;
+	return EDWL_HTTP_OK;
 }

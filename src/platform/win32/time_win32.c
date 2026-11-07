@@ -24,7 +24,7 @@ static void ensure_freq(void)
 	}
 }
 
-uint64_t wgetx_now_ms(void)
+uint64_t edwl_now_ms(void)
 {
 	LARGE_INTEGER c;
 
@@ -34,7 +34,7 @@ uint64_t wgetx_now_ms(void)
 			  (c.QuadPart % qpc_freq) * 1000 / qpc_freq);
 }
 
-uint64_t wgetx_now_us(void)
+uint64_t edwl_now_us(void)
 {
 	LARGE_INTEGER c;
 
@@ -44,7 +44,7 @@ uint64_t wgetx_now_us(void)
 			  (c.QuadPart % qpc_freq) * 1000000 / qpc_freq);
 }
 
-void wgetx_sleep_ms(uint32_t ms)
+void edwl_sleep_ms(uint32_t ms)
 {
 	if (ms == 0)
 		return;

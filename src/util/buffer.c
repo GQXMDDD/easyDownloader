@@ -11,7 +11,7 @@
 
 #include <edwl/util/buffer.h>
 
-int wgetx_buf_init(struct wgetx_buf *b, size_t cap)
+int edwl_buf_init(struct edwl_buf *b, size_t cap)
 {
 	if (!b)
 		return -1;
@@ -31,7 +31,7 @@ int wgetx_buf_init(struct wgetx_buf *b, size_t cap)
 	return 0;
 }
 
-void wgetx_buf_free(struct wgetx_buf *b)
+void edwl_buf_free(struct edwl_buf *b)
 {
 	if (!b)
 		return;
@@ -41,7 +41,7 @@ void wgetx_buf_free(struct wgetx_buf *b)
 	b->cap = 0;
 }
 
-int wgetx_buf_reserve(struct wgetx_buf *b, size_t need)
+int edwl_buf_reserve(struct edwl_buf *b, size_t need)
 {
 	size_t want, cap_new;
 	char *grown;
@@ -68,11 +68,11 @@ int wgetx_buf_reserve(struct wgetx_buf *b, size_t need)
 	return 0;
 }
 
-int wgetx_buf_append(struct wgetx_buf *b, const void *data, size_t len)
+int edwl_buf_append(struct edwl_buf *b, const void *data, size_t len)
 {
 	if (!b || (!data && len > 0))
 		return -1;
-	if (wgetx_buf_reserve(b, len) != 0)
+	if (edwl_buf_reserve(b, len) != 0)
 		return -1;
 
 	if (len > 0)
@@ -82,14 +82,14 @@ int wgetx_buf_append(struct wgetx_buf *b, const void *data, size_t len)
 	return 0;
 }
 
-int wgetx_buf_append_str(struct wgetx_buf *b, const char *s)
+int edwl_buf_append_str(struct edwl_buf *b, const char *s)
 {
 	if (!s)
 		return 0;
-	return wgetx_buf_append(b, s, strlen(s));
+	return edwl_buf_append(b, s, strlen(s));
 }
 
-int wgetx_buf_appendf(struct wgetx_buf *b, const char *fmt, ...)
+int edwl_buf_appendf(struct edwl_buf *b, const char *fmt, ...)
 {
 	va_list ap;
 	int n;
@@ -108,7 +108,7 @@ int wgetx_buf_appendf(struct wgetx_buf *b, const char *fmt, ...)
 	}
 
 	/* 空间不够：按需要量扩一次再重来 */
-	if (wgetx_buf_reserve(b, (size_t)n) != 0)
+	if (edwl_buf_reserve(b, (size_t)n) != 0)
 		return -1;
 
 	va_start(ap, fmt);
@@ -121,7 +121,7 @@ int wgetx_buf_appendf(struct wgetx_buf *b, const char *fmt, ...)
 	return 0;
 }
 
-void wgetx_buf_reset(struct wgetx_buf *b)
+void edwl_buf_reset(struct edwl_buf *b)
 {
 	if (!b || !b->data)
 		return;
@@ -129,7 +129,7 @@ void wgetx_buf_reset(struct wgetx_buf *b)
 	b->data[0] = '\0';
 }
 
-char *wgetx_buf_cstr(struct wgetx_buf *b)
+char *edwl_buf_cstr(struct edwl_buf *b)
 {
 	if (!b || !b->data)
 		return NULL;

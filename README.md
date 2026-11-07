@@ -172,7 +172,7 @@ piece 0 786431 589824        # begin end next_pos
 
 ```
 include/edwl/
-  wgetx.h                 公共 API（wgetx_main / wgetx_version）
+  edwl.h                 公共 API（edwl_main / edwl_version）
   core/                   downloader / segment / task_queue / thread_pool /
                           http_client / source / checksum
   platform/               platform.h 统一入口 + file_io/thread/time/console

@@ -6,7 +6,7 @@
 
 #include "console_fmt.h"
 
-void wgetx_console_format_size(uint64_t bytes, char *buf, size_t size)
+void edwl_console_format_size(uint64_t bytes, char *buf, size_t size)
 {
 	static const char *const units[] = {"B",   "KiB", "MiB",
 					    "GiB", "TiB", "PiB"};
@@ -31,7 +31,7 @@ static void format_speed(uint64_t bps, char *buf, size_t size)
 		snprintf(buf, size, "--");
 		return;
 	}
-	wgetx_console_format_size(bps, unit, sizeof(unit));
+	edwl_console_format_size(bps, unit, sizeof(unit));
 	snprintf(buf, size, "%s/s", unit);
 }
 
@@ -50,8 +50,8 @@ static void format_elapsed(uint64_t ms, char *buf, size_t size)
 			 (unsigned long long)(total_s % 60));
 }
 
-size_t wgetx_console_format_progress(const struct wgetx_progress *p, char *buf,
-				     size_t size, int width)
+size_t edwl_console_format_progress(const struct edwl_progress *p, char *buf,
+				    size_t size, int width)
 {
 	char done[32], total[32], speed[48], elapsed[24];
 	char bar[80];
@@ -66,9 +66,9 @@ size_t wgetx_console_format_progress(const struct wgetx_progress *p, char *buf,
 	if (width < 40)
 		width = 40;
 
-	wgetx_console_format_size(p->done, done, sizeof(done));
+	edwl_console_format_size(p->done, done, sizeof(done));
 	if (p->total > 0) {
-		wgetx_console_format_size(p->total, total, sizeof(total));
+		edwl_console_format_size(p->total, total, sizeof(total));
 		pct = (double)p->done * 100.0 / (double)p->total;
 		if (pct > 100.0)
 			pct = 100.0;

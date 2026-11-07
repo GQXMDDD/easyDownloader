@@ -4,13 +4,13 @@
  * 职责：探测 → 切片 → 起线程池 → 汇总进度 → 断点保存 → 校验。
  * 所有平台差异都在 platform/ 后面，本层只用标准 C。
  */
-#ifndef WGETX_CORE_DOWNLOADER_H
-#define WGETX_CORE_DOWNLOADER_H
+#ifndef EDWL_CORE_DOWNLOADER_H
+#define EDWL_CORE_DOWNLOADER_H
 
 #include <stddef.h>
 #include <stdint.h>
 
-struct wgetx_download_opts {
+struct edwl_download_opts {
 	const char *output;	 /* 输出路径；NULL 则由 URL 推断 */
 	const char *const *urls; /* 至少一个，多个视为镜像 */
 	size_t url_count;
@@ -35,7 +35,7 @@ struct wgetx_download_opts {
 	int quiet;	   /* 1 只输出错误 */
 };
 
-struct wgetx_download_result {
+struct edwl_download_result {
 	uint64_t bytes;	 /* 最终文件大小 */
 	uint64_t total;	 /* 服务器给的总长 */
 	unsigned pieces; /* 分片数 */
@@ -46,10 +46,10 @@ struct wgetx_download_result {
 };
 
 /* 填默认值 */
-void wgetx_download_opts_default(struct wgetx_download_opts *o);
+void edwl_download_opts_default(struct edwl_download_opts *o);
 
-/* 执行一次下载。返回 WGETX_EXIT_* 中的值 */
-int wgetx_download_run(const struct wgetx_download_opts *o,
-		       struct wgetx_download_result *r);
+/* 执行一次下载。返回 EDWL_EXIT_* 中的值 */
+int edwl_download_run(const struct edwl_download_opts *o,
+		      struct edwl_download_result *r);
 
-#endif /* WGETX_CORE_DOWNLOADER_H */
+#endif /* EDWL_CORE_DOWNLOADER_H */

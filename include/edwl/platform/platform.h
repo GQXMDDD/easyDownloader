@@ -6,12 +6,12 @@
  * 以及本文件。出现 <windows.h> / <unistd.h> / <pthread.h> / <curl/curl.h>
  * 都算违规（http_client.c 的 curl 头是唯一例外）。
  */
-#ifndef WGETX_PLATFORM_H
-#define WGETX_PLATFORM_H
+#ifndef EDWL_PLATFORM_H
+#define EDWL_PLATFORM_H
 
 #include "file_io.h"
 #include "thread.h"
 #include "time.h"
 #include "console.h"
 
-#endif /* WGETX_PLATFORM_H */
+#endif /* EDWL_PLATFORM_H */

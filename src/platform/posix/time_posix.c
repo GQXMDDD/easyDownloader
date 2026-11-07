@@ -6,7 +6,7 @@
 
 #include <edwl/platform/platform.h>
 
-uint64_t wgetx_now_ms(void)
+uint64_t edwl_now_ms(void)
 {
 	struct timespec ts;
 
@@ -15,7 +15,7 @@ uint64_t wgetx_now_ms(void)
 	       (uint64_t)(ts.tv_nsec / 1000000L);
 }
 
-uint64_t wgetx_now_us(void)
+uint64_t edwl_now_us(void)
 {
 	struct timespec ts;
 
@@ -24,7 +24,7 @@ uint64_t wgetx_now_us(void)
 	       (uint64_t)(ts.tv_nsec / 1000L);
 }
 
-void wgetx_sleep_ms(uint32_t ms)
+void edwl_sleep_ms(uint32_t ms)
 {
 	struct timespec req, rem;
 

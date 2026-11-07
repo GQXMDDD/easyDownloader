@@ -9,13 +9,13 @@
 
 | 头文件 | 必须实现的函数 |
 |---|---|
-| `file_io.h` | `wgetx_file_open_write` / `wgetx_file_open_read` / `wgetx_file_truncate` / `wgetx_file_size` / `wgetx_file_pwrite` / `wgetx_file_pread` / `wgetx_file_close` |
-| `thread.h` | `wgetx_thread_create` / `wgetx_thread_join` / `wgetx_thread_current_id` / `wgetx_mutex_*` / `wgetx_cond_*`（含 `timedwait`） |
-| `time.h` | `wgetx_now_ms` / `wgetx_now_us` / `wgetx_sleep_ms` |
-| `console.h` | `wgetx_console_init` / `shutdown` / `ansi` / `tty` / `width` / `write` / `write_err` / `progress_draw` / `progress_end` / `install_interrupt` / `interrupt_requested` / `interrupt_reset` / `format_size` |
+| `file_io.h` | `edwl_file_open_write` / `edwl_file_open_read` / `edwl_file_truncate` / `edwl_file_size` / `edwl_file_pwrite` / `edwl_file_pread` / `edwl_file_close` |
+| `thread.h` | `edwl_thread_create` / `edwl_thread_join` / `edwl_thread_current_id` / `edwl_mutex_*` / `edwl_cond_*`（含 `timedwait`） |
+| `time.h` | `edwl_now_ms` / `edwl_now_us` / `edwl_sleep_ms` |
+| `console.h` | `edwl_console_init` / `shutdown` / `ansi` / `tty` / `width` / `write` / `write_err` / `progress_draw` / `progress_end` / `install_interrupt` / `interrupt_requested` / `interrupt_reset` / `format_size` |
 
 进度行的文本排版逻辑已经抽到 `src/platform/console_fmt.c`（平台无关），
-新平台的 `progress_draw` 只需要：取宽度 → 调 `wgetx_console_format_progress()`
+新平台的 `progress_draw` 只需要：取宽度 → 调 `edwl_console_format_progress()`
 → 决定用 `\r` 覆盖还是逐行输出。
 
 ## 2. 接入构建
@@ -59,14 +59,14 @@ endif()
 
 ### 3.3 条件变量必须和同一把互斥量配对
 
-`wgetx_cond_wait(c, m)` 的语义是"原子地释放 m 并等待"，所以调用方必须先持有 m。
+`edwl_cond_wait(c, m)` 的语义是"原子地释放 m 并等待"，所以调用方必须先持有 m。
 Win32 侧是 `SleepConditionVariableCS(&cv, &cs, INFINITE)`，POSIX 侧是
 `pthread_cond_wait(&cond, &mutex)`，`timedwait` 的返回值约定是
 **1=被唤醒 / 0=超时 / -1=出错**。
 
 ### 3.4 时钟必须单调
 
-测速、超时、退避都用 `wgetx_now_ms()`。不要用墙钟（`time()` / `GetLocalTime`）：
+测速、超时、退避都用 `edwl_now_ms()`。不要用墙钟（`time()` / `GetLocalTime`）：
 NTP 校时会跳，速度会算出负数或尖峰。Windows 用 `QueryPerformanceCounter`。
 
 ### 3.5 Ctrl-C / 中断

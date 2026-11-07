@@ -50,5 +50,5 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cm
 ## 为什么头文件只出现在一个 .c 里
 
 `<curl/curl.h>` 只允许被 `src/core/http_client.c` 包含。上层看不到 `CURL*`、
-`CURLcode`、`curl_slist` 这些类型，只看到 `wgetx_http_*` 和自定义的
-`struct wgetx_http_sink`。将来换 WinHTTP 或 nghttp2 时，改这一个文件即可。
+`CURLcode`、`curl_slist` 这些类型，只看到 `edwl_http_*` 和自定义的
+`struct edwl_http_sink`。将来换 WinHTTP 或 nghttp2 时，改这一个文件即可。

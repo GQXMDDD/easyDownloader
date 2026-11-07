@@ -14,12 +14,12 @@
 #include <edwl/core/http_client.h>
 #include <edwl/platform/platform.h>
 #include <edwl/util/log.h>
-#include <edwl/wgetx.h>
+#include <edwl/edwl.h>
 
 #define MAX_URLS 16
 
 struct cli {
-	struct wgetx_download_opts opts;
+	struct edwl_download_opts opts;
 	const char *urls[MAX_URLS];
 	size_t url_count;
 	const char *proxy;
@@ -27,9 +27,9 @@ struct cli {
 	const char *bad_text;
 };
 
-const char *wgetx_version(void)
+const char *edwl_version(void)
 {
-	return WGETX_VERSION_STRING;
+	return EDWL_VERSION_STRING;
 }
 
 static void usage(void)
@@ -70,7 +70,7 @@ static void usage(void)
 	    "  -h, --help             显示本帮助\n"
 	    "  -V, --version          显示版本\n";
 
-	wgetx_console_write(text);
+	edwl_console_write(text);
 }
 
 /* ---------- 数值解析 ---------- */
@@ -263,9 +263,9 @@ static int parse_args(int argc, char **argv, struct cli *c)
 			snprintf(line, sizeof(line),
 				 "%s %s\n多线程分片下载器（纯 C 实现）\n内置 "
 				 "HTTP 层: %s\n",
-				 WGETX_PROGRAM_NAME, wgetx_version(),
-				 wgetx_http_version());
-			wgetx_console_write(line);
+				 EDWL_PROGRAM_NAME, edwl_version(),
+				 edwl_http_version());
+			edwl_console_write(line);
 			return 1;
 		}
 		if (!strcmp(a, "-q") || !strcmp(a, "--quiet")) {
@@ -313,7 +313,7 @@ static int parse_args(int argc, char **argv, struct cli *c)
 		if (!strncmp(a, "--sha256", 8)) {
 			const char *v = long_value(argc, argv, &i, a, 8);
 
-			if (!v || !wgetx_hash_is_valid(v)) {
+			if (!v || !edwl_hash_is_valid(v)) {
 				c->bad_text = a;
 				return -1;
 			}
@@ -346,62 +346,62 @@ static void report_bad_option(const struct cli *c)
 
 	snprintf(line, sizeof(line), "edwl: 无法识别的选项或非法取值: %s\n",
 		 c->bad_text ? c->bad_text : "?");
-	wgetx_console_write_err(line);
-	wgetx_console_write_err("用 edwl --help 看用法\n");
+	edwl_console_write_err(line);
+	edwl_console_write_err("用 edwl --help 看用法\n");
 }
 
-int wgetx_main(int argc, char **argv)
+int edwl_main(int argc, char **argv)
 {
 	struct cli c;
-	struct wgetx_download_result result;
+	struct edwl_download_result result;
 	int parsed;
 	int rc;
 
 	memset(&c, 0, sizeof(c));
-	wgetx_download_opts_default(&c.opts);
+	edwl_download_opts_default(&c.opts);
 
 	/*
 	 * 先初始化控制台再解析参数：--help / --version 也会输出中文，
 	 * 必须在控制台进入可正确显示状态之后再打印。
 	 */
-	wgetx_console_init();
+	edwl_console_init();
 
 	parsed = parse_args(argc, argv, &c);
 	if (parsed == 1) {
-		wgetx_console_shutdown();
-		return WGETX_EXIT_OK;
+		edwl_console_shutdown();
+		return EDWL_EXIT_OK;
 	}
 	if (parsed < 0) {
 		report_bad_option(&c);
-		wgetx_console_shutdown();
-		return WGETX_EXIT_USAGE;
+		edwl_console_shutdown();
+		return EDWL_EXIT_USAGE;
 	}
 
 	if (c.opts.quiet)
-		wgetx_log_init(WGETX_LOG_ERROR);
+		edwl_log_init(EDWL_LOG_ERROR);
 	else if (c.debug)
-		wgetx_log_init(WGETX_LOG_DEBUG);
+		edwl_log_init(EDWL_LOG_DEBUG);
 	else
-		wgetx_log_init(WGETX_LOG_INFO);
+		edwl_log_init(EDWL_LOG_INFO);
 
 	if (c.url_count == 0) {
 		usage();
-		wgetx_console_shutdown();
-		return WGETX_EXIT_USAGE;
+		edwl_console_shutdown();
+		return EDWL_EXIT_USAGE;
 	}
 
 	c.opts.urls = c.urls;
 	c.opts.url_count = c.url_count;
 	c.opts.proxy = c.proxy;
 
-	rc = wgetx_download_run(&c.opts, &result);
+	rc = edwl_download_run(&c.opts, &result);
 
-	wgetx_console_shutdown();
-	wgetx_log_shutdown();
+	edwl_console_shutdown();
+	edwl_log_shutdown();
 	return rc;
 }
 
 int main(int argc, char **argv)
 {
-	return wgetx_main(argc, argv);
+	return edwl_main(argc, argv);
 }

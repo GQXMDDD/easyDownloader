@@ -8,21 +8,21 @@
 
 #include <edwl/platform/platform.h>
 
-struct wgetx_thread {
+struct edwl_thread {
 	pthread_t tid;
 };
 
-struct wgetx_mutex {
+struct edwl_mutex {
 	pthread_mutex_t lock;
 };
 
-struct wgetx_cond {
+struct edwl_cond {
 	pthread_cond_t cond;
 };
 
-int wgetx_thread_create(wgetx_thread **out, wgetx_thread_fn fn, void *arg)
+int edwl_thread_create(edwl_thread **out, edwl_thread_fn fn, void *arg)
 {
-	wgetx_thread *t;
+	edwl_thread *t;
 
 	if (!out || !fn)
 		return -1;
@@ -40,7 +40,7 @@ int wgetx_thread_create(wgetx_thread **out, wgetx_thread_fn fn, void *arg)
 	return 0;
 }
 
-int wgetx_thread_join(wgetx_thread *t)
+int edwl_thread_join(edwl_thread *t)
 {
 	int rc;
 
@@ -51,14 +51,14 @@ int wgetx_thread_join(wgetx_thread *t)
 	return rc == 0 ? 0 : -1;
 }
 
-unsigned long wgetx_thread_current_id(void)
+unsigned long edwl_thread_current_id(void)
 {
 	return (unsigned long)pthread_self();
 }
 
-int wgetx_mutex_init(wgetx_mutex **out)
+int edwl_mutex_init(edwl_mutex **out)
 {
-	wgetx_mutex *m;
+	edwl_mutex *m;
 
 	if (!out)
 		return -1;
@@ -73,21 +73,21 @@ int wgetx_mutex_init(wgetx_mutex **out)
 	return 0;
 }
 
-int wgetx_mutex_lock(wgetx_mutex *m)
+int edwl_mutex_lock(edwl_mutex *m)
 {
 	if (!m)
 		return -1;
 	return pthread_mutex_lock(&m->lock) == 0 ? 0 : -1;
 }
 
-int wgetx_mutex_unlock(wgetx_mutex *m)
+int edwl_mutex_unlock(edwl_mutex *m)
 {
 	if (!m)
 		return -1;
 	return pthread_mutex_unlock(&m->lock) == 0 ? 0 : -1;
 }
 
-void wgetx_mutex_destroy(wgetx_mutex *m)
+void edwl_mutex_destroy(edwl_mutex *m)
 {
 	if (!m)
 		return;
@@ -95,9 +95,9 @@ void wgetx_mutex_destroy(wgetx_mutex *m)
 	free(m);
 }
 
-int wgetx_cond_init(wgetx_cond **out)
+int edwl_cond_init(edwl_cond **out)
 {
-	wgetx_cond *c;
+	edwl_cond *c;
 
 	if (!out)
 		return -1;
@@ -112,7 +112,7 @@ int wgetx_cond_init(wgetx_cond **out)
 	return 0;
 }
 
-int wgetx_cond_wait(wgetx_cond *c, wgetx_mutex *m)
+int edwl_cond_wait(edwl_cond *c, edwl_mutex *m)
 {
 	int rc;
 
@@ -124,7 +124,7 @@ int wgetx_cond_wait(wgetx_cond *c, wgetx_mutex *m)
 	return -1;
 }
 
-int wgetx_cond_timedwait(wgetx_cond *c, wgetx_mutex *m, uint32_t ms)
+int edwl_cond_timedwait(edwl_cond *c, edwl_mutex *m, uint32_t ms)
 {
 	struct timespec deadline;
 	uint64_t add_ns;
@@ -150,21 +150,21 @@ int wgetx_cond_timedwait(wgetx_cond *c, wgetx_mutex *m, uint32_t ms)
 	return -1;
 }
 
-int wgetx_cond_signal(wgetx_cond *c)
+int edwl_cond_signal(edwl_cond *c)
 {
 	if (!c)
 		return -1;
 	return pthread_cond_signal(&c->cond) == 0 ? 0 : -1;
 }
 
-int wgetx_cond_broadcast(wgetx_cond *c)
+int edwl_cond_broadcast(edwl_cond *c)
 {
 	if (!c)
 		return -1;
 	return pthread_cond_broadcast(&c->cond) == 0 ? 0 : -1;
 }
 
-void wgetx_cond_destroy(wgetx_cond *c)
+void edwl_cond_destroy(edwl_cond *c)
 {
 	if (!c)
 		return;

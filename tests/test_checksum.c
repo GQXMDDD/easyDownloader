@@ -10,19 +10,19 @@
 
 static void test_vectors(void)
 {
-	char hex[WGETX_SHA256_HEX];
+	char hex[EDWL_SHA256_HEX];
 
-	wgetx_sha256_buf("", 0, hex);
+	edwl_sha256_buf("", 0, hex);
 	CHECK_STR(
 	    hex,
 	    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
-	wgetx_sha256_buf("abc", 3, hex);
+	edwl_sha256_buf("abc", 3, hex);
 	CHECK_STR(
 	    hex,
 	    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
-	wgetx_sha256_buf(
+	edwl_sha256_buf(
 	    "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56,
 	    hex);
 	CHECK_STR(
@@ -35,7 +35,7 @@ static void test_long_input(void)
 	static const char expect[] =
 	    "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0";
 	char *buf;
-	char hex[WGETX_SHA256_HEX];
+	char hex[EDWL_SHA256_HEX];
 
 	buf = malloc(1000000);
 	if (!buf) {
@@ -43,24 +43,24 @@ static void test_long_input(void)
 		return;
 	}
 	memset(buf, 'a', 1000000);
-	wgetx_sha256_buf(buf, 1000000, hex);
+	edwl_sha256_buf(buf, 1000000, hex);
 	CHECK_STR(hex, expect);
 	free(buf);
 }
 
 static void test_hash_helpers(void)
 {
-	CHECK(wgetx_hash_is_valid("ba7816bf8f01cfea414140de5dae2223b00361a39617"
-				  "7a9cb410ff61f20015ad"));
-	CHECK(!wgetx_hash_is_valid("zz7816bf"));
-	CHECK(!wgetx_hash_is_valid(NULL));
+	CHECK(edwl_hash_is_valid("ba7816bf8f01cfea414140de5dae2223b00361a39617"
+				 "7a9cb410ff61f20015ad"));
+	CHECK(!edwl_hash_is_valid("zz7816bf"));
+	CHECK(!edwl_hash_is_valid(NULL));
 
 	/* 大小写不敏感，且容忍结尾换行 */
-	CHECK(wgetx_hash_equals(
+	CHECK(edwl_hash_equals(
 	    "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
 	    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 	    "\n"));
-	CHECK(!wgetx_hash_equals(
+	CHECK(!edwl_hash_equals(
 	    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
 	    "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd"
 	    "0"));
