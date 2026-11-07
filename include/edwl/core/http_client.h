@@ -33,6 +33,7 @@ struct edwl_http_opts {
 	uint64_t max_recv_speed;     /* 字节/秒，0 不限 */
 	const char *proxy;	     /* NULL 跟随环境变量；"" 表示强制直连 */
 	unsigned max_redirects;	     /* 0 用默认 10 */
+	int verbose;		     /* 1 = libcurl 详细调试输出 */
 };
 
 struct edwl_http_info {
@@ -67,6 +68,17 @@ const char *edwl_http_error(struct edwl_http *h);
 
 /* 0 成功，-1 失败 */
 int edwl_http_open(struct edwl_http **out, const struct edwl_http_opts *opts);
+
+/*
+ * worker 线程内的连接复用：首次调用创建，之后复用同一个 easy handle
+ * （curl 会保持 TCP/TLS 连接与 DNS 缓存，省掉每片一次握手）。
+ * 拿到的句柄不要 edwl_http_close，线程退出时调 edwl_http_thread_release()。
+ */
+int edwl_http_thread_get(const struct edwl_http_opts *opts,
+			 struct edwl_http **out);
+void edwl_http_thread_release(void);
+/* 本次传输出错时丢掉线程句柄，下一次强制新建连接（避免复用坏连接） */
+void edwl_http_thread_drop(void);
 void edwl_http_close(struct edwl_http *h);
 
 /*

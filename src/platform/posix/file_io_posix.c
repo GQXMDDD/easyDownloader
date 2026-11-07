@@ -4,8 +4,11 @@
  * pwrite/pread 天然就是定位读写，且多线程共用一个 fd 是安全的
  * （每次调用自带偏移，不共享文件位置指针）。
  */
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -102,4 +105,34 @@ int edwl_file_close(edwl_file_t fd)
 	if (fd < 0)
 		return -1;
 	return close((int)fd) == 0 ? 0 : -1;
+}
+
+int edwl_dir_list(const char *dir, int (*fn)(const char *name, void *ctx),
+		  void *ctx)
+{
+	DIR *d;
+	struct dirent *entry;
+
+	if (!dir || !fn)
+		return -1;
+	d = opendir(dir);
+	if (!d)
+		return -1;
+
+	while ((entry = readdir(d)) != NULL) {
+		char full[1024];
+		struct stat st;
+
+		if (strcmp(entry->d_name, ".") == 0 ||
+		    strcmp(entry->d_name, "..") == 0)
+			continue;
+		snprintf(full, sizeof(full), "%s/%s", dir, entry->d_name);
+		if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+			continue;
+		if (fn(entry->d_name, ctx) != 0)
+			break;
+	}
+
+	closedir(d);
+	return 0;
 }

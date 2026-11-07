@@ -13,6 +13,7 @@ option(EDWL_STATIC_CURL "静态链接 libcurl（Windows 下可得到绿色单文
 # ---------------------------------------------------------------------------
 
 set(EDWL_LIB_SOURCES
+	src/core/blacklist.c
 	src/core/checksum.c
 	src/core/downloader.c
 	src/core/http_client.c
@@ -21,9 +22,11 @@ set(EDWL_LIB_SOURCES
 	src/core/task_queue.c
 	src/core/thread_pool.c
 	src/util/buffer.c
+	src/util/config.c
 	src/util/log.c
 	src/util/url.c
 	src/platform/console_fmt.c
+	third_party/inih/ini.c
 )
 
 if(WIN32)
@@ -111,6 +114,14 @@ add_library(edwl_lib STATIC ${EDWL_LIB_SOURCES})
 target_include_directories(edwl_lib PUBLIC
 	${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+# inih 只在 src/util/config.c 里出现，所以用 PRIVATE
+target_include_directories(edwl_lib PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/third_party/inih
+)
+target_compile_definitions(edwl_lib PRIVATE
+	INI_MAX_LINE=1024
+	INI_ALLOW_MULTILINE=0
+)
 
 if(EDWL_CURL_FOUND)
 	target_include_directories(edwl_lib PUBLIC ${EDWL_CURL_CFLAGS})
@@ -156,7 +167,8 @@ install(TARGETS edwl RUNTIME DESTINATION bin)
 
 if(EDWL_BUILD_TESTS)
 	enable_testing()
-	foreach(tname test_url test_segment test_queue test_checksum test_file_io)
+	foreach(tname test_url test_segment test_queue test_checksum test_file_io
+	             test_config test_blacklist)
 		add_executable(${tname} tests/${tname}.c)
 		target_link_libraries(${tname} PRIVATE edwl_lib)
 		target_include_directories(${tname} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

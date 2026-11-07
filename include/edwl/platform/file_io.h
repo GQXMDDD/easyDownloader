@@ -43,4 +43,11 @@ int64_t edwl_file_pread(edwl_file_t fd, void *buf, size_t count,
 /* 关闭句柄。0 成功，-1 失败 */
 int edwl_file_close(edwl_file_t fd);
 
+/*
+ * 列出目录下的普通文件名（不含路径），对每个名字回调一次；
+ * 回调返回非 0 则提前停止。0 成功，-1 失败（目录不存在/无权限）。
+ */
+int edwl_dir_list(const char *dir, int (*fn)(const char *name, void *ctx),
+		  void *ctx);
+
 #endif /* EDWL_PLATFORM_FILE_IO_H */

@@ -27,6 +27,7 @@
 |---|---|
 | C 编译器 | gcc / clang，C11 |
 | libcurl | 开发包（头文件 + 库），HTTPS 靠它 |
+| inih | 已随仓库放在 `third_party/inih`（BSD-3），用于解析 `edwl.ini` |
 | CMake ≥ 3.16 | 构建 |
 | pkg-config | 可选但推荐：用来拿 `libcurl` 的完整链接参数 |
 
@@ -121,10 +122,60 @@ edwl --no-range -O y.bin https://example.com/y.bin
 | `--sha256 HEX` | 下载完成后校验整文件 SHA-256 |
 | `--no-range` | 禁用分片，强制单连接 |
 | `--proxy URL` / `--no-proxy` | 指定代理 / 忽略环境变量代理 |
+| `--config FILE` | 指定配置文件（默认 `./edwl.ini`） |
+| `--no-config` | 不读配置文件 |
+| `--generate-config` | 生成默认配置模板后退出 |
+| `-W, --wait` | 结束前等回车（双击运行时方便看清结果） |
+| `--no-blacklist` | 本次忽略黑名单 |
 | `-q, --quiet` / `--no-progress` | 安静模式 / 不画进度 |
 | `-h` / `-V` | 帮助 / 版本 |
 
 退出码：`0` 成功、`1` 出错、`2` 用法错误、`3` 校验不匹配、`130` 被中断。
+
+每次下载结束都会打印用时明细（小于 1 秒用毫秒显示，免得"没看清就下完了"）：
+
+```
+[result] 大小: 2.0 MiB
+[result] 用时: 总计 209 ms（探测 3 ms + 传输 206 ms）   平均 9.7 MiB/s
+[result] 分片: 8 片, 4 路并发
+[result] 单片用时: 最快 2.5 ms, 最慢 3.8 ms, 平均 3.2 ms
+```
+
+`用时` 拆成"探测（拿总长/Range/ETag）+ 传输（真正拉数据）"，平均速度按传输耗时算，
+单片用时给出最快/最慢/平均，方便判断是服务器慢还是并行度不够。
+
+---
+
+## 配置文件（edwl.ini）
+
+默认读取当前目录的 `edwl.ini`；`--config FILE` 可指定别的路径，`--no-config` 完全忽略。
+**优先级：命令行参数 > 配置文件 > 内置默认值。**
+
+```bash
+edwl --generate-config      # 导出一份带注释的模板
+```
+
+| 段 | 键 | 说明 |
+|---|---|---|
+| `[General]` | Threads / DynamicThreads / MaxSpeed / MinSpeed / Timeout / Retries / RetryBackoff / OutputDir / ChunkSizeMB / UserAgent / ResumeFileExt | 并发、限速、超时、重试、输出目录 |
+| `[Logging]` | Enable / Level（`off`·`low`·`high`·`max`）/ Output（`console`·`file`·`both`）/ FilePath / Retention（`1000L` 按行、`30T` 按天）/ TimeFormat | 日志 |
+| `[Blacklist]` | Enable / Hosts（支持 `*`，`_.example.com` 等价 `*.example.com`）/ IPs（CIDR） | 命中即拒绝 |
+| `[Mirrors]` | `原始域名 = 镜像1, 镜像2` | 命中原始域名时自动追加镜像源 |
+| `[OpenSpeedy]` | Enable / SpeedMultiplier（`auto` 或 0.25–8） | 内置倍率加速，见下 |
+
+要点：
+
+- **黑名单在发起任何请求之前生效**，被拦下的目标一个字节都不会被请求；HTTP 跳转后的
+  实际地址会再检查一次。命中时退出码 `1`，可用 `--no-blacklist` 临时绕过。
+- **日志**：`Level=low` 只出错误与结果，`high` 再加分片进度，`max` 加 libcurl 调试输出。
+  按天模式会写成 `edwl-YYYY-MM-DD.log`，并清理超过保留天数的旧文件；按行模式在启动时
+  把文件裁到最后 N 行。
+- 日志里的时间戳只加在**文件**里（终端输出保持干净），格式由 `TimeFormat` 决定。
+- **倍率加速**（`[OpenSpeedy]`）：思路参考 OpenSpeedy 的"倍率"概念，实现是本项目自己的。
+  - 固定倍率 `2`：并发 = `Threads × 2`（上限 64），分片同时按倍率切小，让更多连接有活干；
+    若同时开 `DynamicThreads`，仍会在 `1…该上限` 之间按速率微调；
+  - `auto`：从 `Threads` 起跑，按实测吞吐自动增减并发，最多涨到 3 倍。
+  - 倍率过大容易触发服务器限流，掉了会由自适应逻辑退回来。
 
 ---
 
@@ -194,8 +245,8 @@ docs/                     架构说明、移植指南
 
 ## 已知限制
 
-- **每片一条连接**：分片之间不复用 TCP/TLS 连接（有意为之，便于故障隔离）。
-  小文件分片少时，握手开销占比会偏高。
+- **连接复用**：每个 worker 线程持有一个 libcurl 句柄并复用（keep-alive + DNS 缓存），
+  片与片之间不再重新握手；worker 退出时统一释放。
 - **限速是近似全局**：libcurl 只有 per-connection 限速，程序按 `max_speed / threads`
   均分到各连接。
 - **单流模式不续传**：服务器不支持 Range 时本来就无法续传；此时也不会写 `.edwl`。

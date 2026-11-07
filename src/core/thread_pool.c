@@ -14,6 +14,7 @@
 struct edwl_thread_pool {
 	struct edwl_task_queue *queue;
 	edwl_pool_job_fn fn;
+	edwl_pool_cleanup_fn cleanup;
 	void *ctx;
 
 	struct edwl_thread **threads;
@@ -39,6 +40,8 @@ static void *worker_main(void *arg)
 			edwl_cond_broadcast(p->cond);
 		edwl_mutex_unlock(p->mtx);
 	}
+	if (p->cleanup)
+		p->cleanup(p->ctx);
 	return NULL;
 }
 
@@ -61,7 +64,8 @@ static void destroy_partial(struct edwl_thread_pool *p, size_t started)
 }
 
 int edwl_pool_create(struct edwl_thread_pool **out, size_t workers,
-		     edwl_pool_job_fn fn, void *ctx)
+		     edwl_pool_job_fn fn, void *ctx,
+		     edwl_pool_cleanup_fn cleanup)
 {
 	struct edwl_thread_pool *p;
 	size_t i = 0;
@@ -74,6 +78,7 @@ int edwl_pool_create(struct edwl_thread_pool **out, size_t workers,
 		return -1;
 
 	p->fn = fn;
+	p->cleanup = cleanup;
 	p->ctx = ctx;
 	p->workers = workers;
 

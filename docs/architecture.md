@@ -154,5 +154,10 @@ main thread                      monitor thread          worker × N
     └─ 全部完成 ←──────────────────────┴─────────────────────┘
 ```
 
-worker 之间不共享 libcurl 句柄：每次传输新建一个 `edwl_http`，用完销毁。
-好处是故障隔离彻底（一个连接炸了不影响别的），代价是每片一次 TCP/TLS 握手。
+worker 之间不共享 libcurl 句柄：每个线程用 `_Thread_local` 持有自己的 `edwl_http`，
+跨分片复用同一条 TCP/TLS 连接（`curl_easy_reset` 不会丢弃活连接与 DNS 缓存），
+线程退出时由线程池的 cleanup 回调统一 `edwl_http_close`。
+
+这是踩过大坑的：早期版本每片新建一条连接，对某些 CDN（例如阿里 Tengine 前置的
+下载站）等于"短时间内大量握手"，会被当成异常流量掐掉——8 线程只有 2.7 MiB/s、
+2/4 线程直接 0 字节。改成复用后同一站点 `-j 8` 从 2.7 MiB/s 提升到约 9–25 MiB/s。

@@ -16,10 +16,12 @@
 struct edwl_thread_pool;
 
 typedef void (*edwl_pool_job_fn)(void *ctx, void *job);
+typedef void (*edwl_pool_cleanup_fn)(void *ctx);
 
 /* 0 成功，-1 失败 */
 int edwl_pool_create(struct edwl_thread_pool **out, size_t workers,
-		     edwl_pool_job_fn fn, void *ctx);
+		     edwl_pool_job_fn fn, void *ctx,
+		     edwl_pool_cleanup_fn cleanup);
 
 /* 提交任务；池已停止返回 -1 */
 int edwl_pool_submit(struct edwl_thread_pool *p, void *job);

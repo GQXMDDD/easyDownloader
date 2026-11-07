@@ -14,6 +14,8 @@
 
 #include <windows.h>
 
+#include <stdio.h>
+
 #include <edwl/platform/platform.h>
 
 static HANDLE as_handle(edwl_file_t fd)
@@ -149,4 +151,29 @@ int edwl_file_close(edwl_file_t fd)
 	if (fd < 0)
 		return -1;
 	return CloseHandle(as_handle(fd)) ? 0 : -1;
+}
+
+int edwl_dir_list(const char *dir, int (*fn)(const char *name, void *ctx),
+		  void *ctx)
+{
+	char pattern[MAX_PATH + 8];
+	WIN32_FIND_DATAA found;
+	HANDLE h;
+
+	if (!dir || !fn)
+		return -1;
+	snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+	h = FindFirstFileA(pattern, &found);
+	if (h == INVALID_HANDLE_VALUE)
+		return -1;
+
+	do {
+		if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			continue;
+		if (fn(found.cFileName, ctx) != 0)
+			break;
+	} while (FindNextFileA(h, &found));
+
+	FindClose(h);
+	return 0;
 }

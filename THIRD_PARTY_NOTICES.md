@@ -6,7 +6,8 @@
 ## 结论（先看这段）
 
 1. **本仓库只包含本项目自己写的 C 代码**，许可证 MIT，版权人 `GQXMDDD`（见 `LICENSE`）。
-2. **仓库里没有任何第三方源码，也没有预编译二进制**。
+2. **仓库里只有一份第三方源码**：`third_party/inih`（BSD-3，用于解析 `edwl.ini`）；
+   **没有预编译二进制**。
 3. 依赖只有 libcurl 一个（MIT，宽松），构建时从系统/包管理器取。
 4. ⚠️ **MSYS2 现成的 `mingw-w64-x86_64-curl-winssl` 静态链接后会带进 LGPL 组件**
    （libidn2 / libunistring / libiconv）。直接分发那种 exe 会产生 LGPL 义务。
@@ -31,6 +32,7 @@
 | 组件 | 许可证 | 说明 |
 |---|---|---|
 | libcurl | MIT（curl license） | 通过 pkg-config 找；可用自建版本替换 |
+| inih | BSD-3-Clause | 随仓库分发，`third_party/inih` |
 | 系统 TLS | Windows SChannel | 操作系统自带，不随项目分发 |
 
 ---
@@ -106,6 +108,7 @@ cmake --build build
 1. 本项目 `LICENSE`（MIT）
 2. curl 的 `LICENSE`（**MIT**）
 3. zlib 的 `LICENSE`（**Zlib**）
+4. inih 的 `third_party/inih/LICENSE.txt`（**BSD-3**）
 
 就这三份，没有 LGPL，不需要"提供可重链接目标文件"那类动作。
 

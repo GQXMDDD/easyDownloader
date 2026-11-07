@@ -33,6 +33,9 @@ struct edwl_http {
 static int curl_ready;
 static char version_text[256];
 
+/* 每个 worker 线程一个复用句柄（C11 _Thread_local） */
+static _Thread_local struct edwl_http *tls_http;
+
 /* ---------- 小工具 ---------- */
 
 static void set_error(struct edwl_http *h, const char *text)
@@ -154,6 +157,34 @@ void edwl_http_close(struct edwl_http *h)
 	free(h);
 }
 
+int edwl_http_thread_get(const struct edwl_http_opts *opts,
+			 struct edwl_http **out)
+{
+	if (!out)
+		return -1;
+	if (tls_http) {
+		*out = tls_http;
+		return 0;
+	}
+	if (edwl_http_open(&tls_http, opts) != 0)
+		return -1;
+	*out = tls_http;
+	return 0;
+}
+
+void edwl_http_thread_drop(void)
+{
+	edwl_http_thread_release();
+}
+
+void edwl_http_thread_release(void)
+{
+	if (!tls_http)
+		return;
+	edwl_http_close(tls_http);
+	tls_http = NULL;
+}
+
 static CURL *ensure_easy(struct edwl_http *h)
 {
 	if (h->easy)
@@ -201,6 +232,8 @@ static void setup_common(struct edwl_http *h, const char *url,
 		/* "" 表示强制直连，覆盖环境变量里的代理 */
 		curl_easy_setopt(e, CURLOPT_PROXY, o->proxy);
 	}
+	if (o->verbose)
+		curl_easy_setopt(e, CURLOPT_VERBOSE, 1L);
 }
 
 /* ---------- 探测 ---------- */

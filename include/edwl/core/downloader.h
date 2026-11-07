@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct edwl_blacklist;
+
 struct edwl_download_opts {
 	const char *output;	 /* 输出路径；NULL 则由 URL 推断 */
 	const char *const *urls; /* 至少一个，多个视为镜像 */
@@ -28,6 +30,15 @@ struct edwl_download_opts {
 
 	const char *expected_sha256; /* NULL 表示不校验 */
 	const char *proxy;	     /* NULL 跟随环境变量；"" 强制直连 */
+	const char *user_agent;	     /* NULL 用内建 UA */
+	const char *resume_ext;	     /* 断点文件后缀，默认 .edwl */
+	const char *output_dir;	     /* 未指定输出路径时的默认目录 */
+	const struct edwl_blacklist *blacklist; /* NULL = 不过滤 */
+	int retry_backoff_fixed;		/* 1 = 固定间隔退避 */
+	int dynamic_threads;			/* 1 = 动态并发 */
+	int superspeed_enable;			/* 1 = 开启倍率加速 */
+	int speedup_auto;			/* 1 = 倍率自动 */
+	double speed_multiplier;		/* 固定倍率 */
 
 	int allow_resume;  /* 1 允许断点续传（默认） */
 	int allow_range;   /* 1 允许分片（默认）；0 走单连接 */
@@ -43,6 +54,15 @@ struct edwl_download_result {
 	int range_used;	 /* 1 表示用了分片 */
 	int verified;	 /* 1 校验通过，0 未要求校验，-1 不匹配 */
 	char sha256[65]; /* 实际算出的哈希 */
+
+	/* 用时统计（毫秒） */
+	uint64_t probe_ms;     /* 探测阶段 */
+	uint64_t transfer_ms;  /* 传输阶段 */
+	uint64_t elapsed_ms;   /* 探测 + 传输 */
+	uint64_t speed_bps;    /* 平均速度（按传输耗时算） */
+	uint64_t piece_min_us; /* 最快的一片（微秒） */
+	uint64_t piece_max_us; /* 最慢的一片 */
+	uint64_t piece_avg_us; /* 平均每片 */
 };
 
 /* 填默认值 */
