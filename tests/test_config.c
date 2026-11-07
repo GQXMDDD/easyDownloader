@@ -116,7 +116,7 @@ static void test_generate(void)
 	CHECK_INT(edwl_config_load(&cfg, TMP_INI), 1);
 	/* 模板里的值应当能被正确读回 */
 	CHECK_INT(cfg.threads, 8);
-	CHECK_STR(cfg.log_level, "low");
+	CHECK_STR(cfg.log_level, "high");
 	CHECK_INT(cfg.blacklist_enable, 1);
 	CHECK(strstr(cfg.blacklist_hosts, "localhost") != NULL);
 	m = edwl_config_find_mirrors(&cfg, "github.com");

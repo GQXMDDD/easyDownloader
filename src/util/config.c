@@ -268,7 +268,10 @@ int edwl_config_load(struct edwl_config *cfg, const char *path)
 	return 1;
 }
 
-static const char *section_of_key(const char *key)
+static const char *section_names[] = {"General", "Logging", "Blacklist",
+				      "OpenSpeedy"};
+
+static int key_in_section(size_t sec, const char *key)
 {
 	static const char *general[] = {
 	    "Threads",	   "DynamicThreads", "MaxSpeed",      "MinSpeed",
@@ -278,18 +281,67 @@ static const char *section_of_key(const char *key)
 	static const char *logging[] = {"Enable",   "Level",	 "Output",
 					"FilePath", "Retention", "TimeFormat",
 					NULL};
-	static const char *blacklist[] = {"Hosts", "IPs", NULL};
-	static const char *speed[] = {"SpeedMultiplier", NULL};
+	static const char *blacklist[] = {"Enable", "Hosts", "IPs", NULL};
+	static const char *speed[] = {"Enable", "SpeedMultiplier", NULL};
 	const char **lists[] = {general, logging, blacklist, speed};
-	const char *names[] = {"General", "Logging", "Blacklist", "OpenSpeedy"};
-	size_t i;
 	size_t j;
 
-	for (i = 0; i < sizeof(lists) / sizeof(lists[0]); i++)
-		for (j = 0; lists[i][j]; j++)
-			if (ci_equal(key, lists[i][j]))
-				return names[i];
-	return NULL;
+	for (j = 0; lists[sec][j]; j++)
+		if (ci_equal(key, lists[sec][j]))
+			return 1;
+	return 0;
+}
+
+int edwl_config_key_sections(const char *key, char *out, size_t out_size)
+{
+	size_t i;
+	size_t used = 0;
+	int found = 0;
+
+	if (!out || out_size == 0)
+		return 0;
+	out[0] = '\0';
+	for (i = 0; i < 4; i++) {
+		size_t n;
+
+		if (!key_in_section(i, key))
+			continue;
+		found++;
+		if (used && used + 1 < out_size)
+			out[used++] = '/';
+		n = strlen(section_names[i]);
+		if (used + n + 1 >= out_size)
+			n = out_size - used - 1;
+		memcpy(out + used, section_names[i], n);
+		used += n;
+		out[used] = '\0';
+	}
+	return found;
+}
+
+static int section_index(const char *name)
+{
+	size_t i;
+
+	for (i = 0; i < 4; i++)
+		if (ci_equal(name, section_names[i]))
+			return (int)i;
+	return -1;
+}
+
+static const char *section_of_key(const char *key)
+{
+	size_t i;
+	const char *found = NULL;
+	int hits = 0;
+
+	for (i = 0; i < 4; i++) {
+		if (!key_in_section(i, key))
+			continue;
+		found = section_names[i];
+		hits++;
+	}
+	return hits == 1 ? found : NULL;
 }
 
 static int file_exists(const char *path)
@@ -317,11 +369,27 @@ void edwl_trim_inplace(char *s)
 		s[--len] = '\0';
 }
 
+/* 从 "[Section]" 行里取出段名；不是段头返回 0 */
+static int parse_section_line(const char *line, char *out, size_t size)
+{
+	size_t n = 0;
+
+	if (!line || line[0] != '[' || size == 0)
+		return 0;
+	while (line[n + 1] && line[n + 1] != ']' && n + 1 < size) {
+		out[n] = line[n + 1];
+		n++;
+	}
+	out[n] = '\0';
+	return 1;
+}
+
 int edwl_config_set_file(const char *path, const char *pair)
 {
 	char section[64];
 	char key[64];
 	char val[512];
+	char secname[64];
 	const char *eq;
 	const char *dot;
 	const char *sec;
@@ -367,8 +435,14 @@ int edwl_config_set_file(const char *path, const char *pair)
 		key[(size_t)(eq - pair) < sizeof(key) ? (size_t)(eq - pair)
 						      : sizeof(key) - 1] = '\0';
 		sec = section_of_key(key);
-		if (!sec)
-			return -2;
+		if (!sec) {
+			char list[128];
+
+			return edwl_config_key_sections(key, list,
+							sizeof(list)) > 1
+				   ? -4
+				   : -2;
+		}
 		snprintf(section, sizeof(section), "%s", sec);
 	}
 	edwl_trim_inplace(key);
@@ -383,8 +457,12 @@ int edwl_config_set_file(const char *path, const char *pair)
 		}
 		key[k] = '\0';
 		edwl_trim_inplace(key);
-		if (!section_of_key(key))
-			return -2;
+		{
+			int si = section_index(section);
+
+			if (si < 0 || !key_in_section((size_t)si, key))
+				return -2;
+		}
 	}
 
 	snprintf(val, sizeof(val), "%s", eq + 1);
@@ -423,19 +501,8 @@ int edwl_config_set_file(const char *path, const char *pair)
 
 		snprintf(tmp, sizeof(tmp), "%s", p);
 		edwl_trim_inplace(tmp);
-		if (tmp[0] == '[') {
-			char secname[64];
-			size_t n = 0;
-
-			in_target = 0;
-			while (tmp[n + 1] && tmp[n + 1] != ']' &&
-			       n + 1 < sizeof(secname)) {
-				secname[n] = tmp[n + 1];
-				n++;
-			}
-			secname[n] = '\0';
-			if (ci_equal(secname, section))
-				in_target = 1;
+		if (parse_section_line(tmp, secname, sizeof(secname))) {
+			in_target = ci_equal(secname, section);
 			continue;
 		}
 		if (!in_target)
@@ -469,16 +536,7 @@ int edwl_config_set_file(const char *path, const char *pair)
 
 			snprintf(tmp, sizeof(tmp), "%s", lines[i]);
 			edwl_trim_inplace(tmp);
-			if (tmp[0] == '[') {
-				char secname[64];
-				size_t n = 0;
-
-				while (tmp[n + 1] && tmp[n + 1] != ']' &&
-				       n + 1 < sizeof(secname)) {
-					secname[n] = tmp[n + 1];
-					n++;
-				}
-				secname[n] = '\0';
+			if (parse_section_line(tmp, secname, sizeof(secname))) {
 				in_target = ci_equal(secname, section);
 				if (in_target)
 					last = (long)i;
@@ -636,10 +694,13 @@ int edwl_config_generate(const char *path)
 	    "\n"
 	    "[OpenSpeedy]\n"
 	    "\n"
-	    "; 内置倍率加速（思路参考 OpenSpeedy "
-	    "的倍率概念，实现是自己写的）：\n"
-	    ";   固定倍率 → 并发 = Threads × 倍率（上限 64），分片同时切小\n"
-	    ";   auto     → 从 Threads 起跑，按实测吞吐自动加/减，上限 3 倍\n"
+	    "; 倍率加速（可选：本段 Enable=off 时整体不生效）\n"
+	    ";   SpeedMultiplier=数字 → 固定倍率(0.25~8)：并发 = Threads × "
+	    "倍率（上限 64），分片同时切小\n"
+	    ";   SpeedMultiplier=auto → 从 Threads "
+	    "起跑，按实测吞吐自动升降并发，最多 3 倍\n"
+	    ";                         不知道填多少就用 "
+	    "auto；倍率过大会被服务器限流\n"
 	    "Enable = off\n"
 	    "SpeedMultiplier = auto\n"
 	    "\n"
@@ -650,7 +711,7 @@ int edwl_config_generate(const char *path)
 	    "\n"
 	    "; 级别：off(无输出) / low(错误和结果) / high(含分片进度) / max(含 "
 	    "HTTP 调试)\n"
-	    "Level = low\n"
+	    "Level = high\n"
 	    "\n"
 	    "; 输出：console(仅终端) / file(仅文件) / both(终端+文件)\n"
 	    "Output = both\n"

@@ -122,10 +122,10 @@ edwl --no-range -O y.bin https://example.com/y.bin
 | `--sha256 HEX` | 下载完成后校验整文件 SHA-256 |
 | `--no-range` | 禁用分片，强制单连接 |
 | `--proxy URL` / `--no-proxy` | 指定代理 / 忽略环境变量代理 |
-| `--config` | 生成默认配置文件（已存在则覆盖） |
+| `--config` | 生成默认配置文件（已存在则不动，避免冲掉你的修改） |
 | `--config ls` | 展示当前生效配置 |
 | `--config FILE` | 使用指定配置文件（默认 `./edwl.ini`） |
-| `-set K=V` | 修改配置文件（不存在会自动生成），可重复；支持 `Logging.Level=high` 这种段名写法 |
+| `-set K=V` | 修改配置文件（不存在会自动生成），可重复；**同名键要写段名**，如 `Blacklist.Enable=off` |
 | `--no-config` | 不读配置文件 |
 | `--generate-config` | 生成默认配置模板后退出 |
 | `-W, --wait` | 结束前等回车（双击运行时方便看清结果） |
@@ -134,6 +134,8 @@ edwl --no-range -O y.bin https://example.com/y.bin
 | `-h` / `-V` | 帮助 / 版本 |
 
 退出码：`0` 成功、`1` 出错、`2` 用法错误、`3` 校验不匹配、`130` 被中断。
+
+进度条属于界面，不受 `Logging.Level` 影响：只要没加 `-q` / `--no-progress` 就会画。
 
 每次下载结束都会打印用时明细（小于 1 秒用毫秒显示，免得"没看清就下完了"）：
 
@@ -164,7 +166,7 @@ edwl --generate-config      # 导出一份带注释的模板
 | `[Logging]` | Enable / Level（`off`·`low`·`high`·`max`）/ Output（`console`·`file`·`both`）/ FilePath / Retention（`1000L` 按行、`30T` 按天）/ TimeFormat | 日志 |
 | `[Blacklist]` | Enable / Hosts（支持 `*`，`_.example.com` 等价 `*.example.com`）/ IPs（CIDR） | 命中即拒绝 |
 | `[Mirrors]` | `原始域名 = 镜像1, 镜像2` | 命中原始域名时自动追加镜像源 |
-| `[OpenSpeedy]` | Enable / SpeedMultiplier（`auto` 或 0.25–8） | 内置倍率加速，见下 |
+| `[OpenSpeedy]` | Enable / SpeedMultiplier | 倍率加速：`auto` 或 0.25–8 的固定倍率；`Enable=off` 时整段不生效 |
 
 要点：
 
@@ -262,8 +264,8 @@ docs/                     架构说明、移植指南
 
 本项目代码是 **MIT**，版权人 `GQXMDDD`，见 `LICENSE`。
 
-**本仓库只放源码，不含任何第三方代码，也不含预编译二进制**——只发布源码时没有
-任何第三方许可义务。唯一的第三方依赖是 libcurl（MIT）。
+**本仓库只放源码，不含预编译二进制**；第三方源码只有 `third_party/inih`（BSD-3，
+解析 `edwl.ini` 用）。
 
 ⚠️ 但如果你要**分发自己构建的静态 exe**，请先读 `THIRD_PARTY_NOTICES.md`：
 MSYS2 现成的 libcurl 静态链接会把 **LGPL-3 的 libidn2 / libunistring** 和

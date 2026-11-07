@@ -16,6 +16,13 @@
 #define EDWL_LOG_LINE_MAX 1024
 #define EDWL_LOG_TRIM_LIMIT (32L * 1024L * 1024L) /* 超过就不做按行裁剪 */
 
+#define LOG_RING_SLOTS 256
+
+struct log_slot {
+	int level;
+	char text[EDWL_LOG_LINE_MAX + 128];
+};
+
 struct log_state {
 	int enabled;
 	int threshold;
@@ -30,11 +37,25 @@ struct log_state {
 	int ret_kind; /* 0 = 按行，1 = 按天 */
 	int ret_value;
 	struct edwl_mutex *mtx;
+
+	/* 异步写盘：环形缓冲 + 独立写线程 */
+	struct log_slot *ring;
+	size_t ring_head;
+	size_t ring_count;
+	int ring_stop;
+	struct edwl_mutex *ring_mtx;
+	struct edwl_cond *ring_cond;
+	struct edwl_thread *writer;
+	unsigned long dropped;
 };
 
 static struct log_state g_log = {
-    1,	EDWL_LOG_INFO,	       1, 0,	NULL, "", "", "",
-    "", "[%Y-%m-%d %H:%M:%S]", 0, 1000, NULL};
+    .enabled = 1,
+    .threshold = EDWL_LOG_INFO,
+    .to_console = 1,
+    .time_fmt = "[%Y-%m-%d %H:%M:%S]",
+    .ret_value = 1000,
+};
 
 /* ---------- 工具 ---------- */
 
@@ -318,6 +339,91 @@ static int ensure_mutex(void)
 	return edwl_mutex_init(&g_log.mtx);
 }
 
+/*
+ * 把一行日志塞进环形缓冲。满了以后：低级别（info/progress/debug）直接丢，
+ * warn 以上最多等 50ms 让写线程腾出位置，还满就丢并计数。
+ */
+static void log_enqueue(int level, const char *text)
+{
+	struct log_slot *slot;
+
+	if (!g_log.ring_mtx || !g_log.ring) {
+		/* 写线程还没起来：退化成同步写，别丢东西 */
+		if (g_log.file) {
+			fputs(text, g_log.file);
+			fflush(g_log.file);
+		}
+		return;
+	}
+
+	edwl_mutex_lock(g_log.ring_mtx);
+	if (g_log.ring_count >= LOG_RING_SLOTS) {
+		if (level > EDWL_LOG_WARN) {
+			g_log.dropped++;
+			edwl_mutex_unlock(g_log.ring_mtx);
+			return;
+		}
+		edwl_cond_timedwait(g_log.ring_cond, g_log.ring_mtx, 50);
+		if (g_log.ring_count >= LOG_RING_SLOTS) {
+			g_log.dropped++;
+			edwl_mutex_unlock(g_log.ring_mtx);
+			return;
+		}
+	}
+	slot =
+	    &g_log.ring[(g_log.ring_head + g_log.ring_count) % LOG_RING_SLOTS];
+	slot->level = level;
+	snprintf(slot->text, sizeof(slot->text), "%s", text);
+	g_log.ring_count++;
+	edwl_cond_signal(g_log.ring_cond);
+	edwl_mutex_unlock(g_log.ring_mtx);
+}
+
+/* 写线程：慢慢把缓冲里的行 fwrite 到磁盘，没数据时阻塞等 */
+static void *writer_main(void *arg)
+{
+	char buf[sizeof(((struct log_slot *)0)->text)];
+	int pending = 0;
+
+	(void)arg;
+	for (;;) {
+		int stop;
+
+		edwl_mutex_lock(g_log.ring_mtx);
+		while (g_log.ring_count == 0 && !g_log.ring_stop)
+			edwl_cond_wait(g_log.ring_cond, g_log.ring_mtx);
+		stop = g_log.ring_stop && g_log.ring_count == 0;
+		if (g_log.ring_count == 0) {
+			edwl_mutex_unlock(g_log.ring_mtx);
+			if (stop)
+				break;
+			continue;
+		}
+		{
+			struct log_slot *slot = &g_log.ring[g_log.ring_head];
+
+			memcpy(buf, slot->text, sizeof(buf));
+			g_log.ring_head =
+			    (g_log.ring_head + 1) % LOG_RING_SLOTS;
+			g_log.ring_count--;
+			edwl_cond_signal(g_log.ring_cond);
+		}
+		edwl_mutex_unlock(g_log.ring_mtx);
+
+		if (g_log.file) {
+			fputs(buf, g_log.file);
+			pending++;
+			if (g_log.ring_count == 0 || pending >= 32) {
+				fflush(g_log.file);
+				pending = 0;
+			}
+		}
+	}
+	if (g_log.file)
+		fflush(g_log.file);
+	return NULL;
+}
+
 int edwl_log_init(const struct edwl_log_opts *opts)
 {
 	struct purge_ctx ctx;
@@ -380,11 +486,42 @@ int edwl_log_init(const struct edwl_log_opts *opts)
 			     g_log.path);
 		return -1;
 	}
+
+	/* 起写线程：之后 edwl_log_msg 只负责入队 */
+	g_log.ring = calloc(LOG_RING_SLOTS, sizeof(*g_log.ring));
+	if (!g_log.ring || edwl_mutex_init(&g_log.ring_mtx) != 0 ||
+	    edwl_cond_init(&g_log.ring_cond) != 0 ||
+	    edwl_thread_create(&g_log.writer, writer_main, NULL) != 0) {
+		g_log.to_file = 0;
+		edwl_log_msg(EDWL_LOG_WARN, "日志写线程起不来，改为同步写");
+		return -1;
+	}
 	return 0;
 }
 
 void edwl_log_shutdown(void)
 {
+	if (g_log.writer) {
+		edwl_mutex_lock(g_log.ring_mtx);
+		g_log.ring_stop = 1;
+		edwl_cond_broadcast(g_log.ring_cond);
+		edwl_mutex_unlock(g_log.ring_mtx);
+		edwl_thread_join(g_log.writer);
+		g_log.writer = NULL;
+	}
+	if (g_log.ring_cond) {
+		edwl_cond_destroy(g_log.ring_cond);
+		g_log.ring_cond = NULL;
+	}
+	if (g_log.ring_mtx) {
+		edwl_mutex_destroy(g_log.ring_mtx);
+		g_log.ring_mtx = NULL;
+	}
+	free(g_log.ring);
+	g_log.ring = NULL;
+	g_log.ring_head = 0;
+	g_log.ring_count = 0;
+	g_log.ring_stop = 0;
 	if (g_log.file) {
 		fclose(g_log.file);
 		g_log.file = NULL;
@@ -474,6 +611,7 @@ static void format_stamp(char *out, size_t size)
 void edwl_log_msg(int level, const char *fmt, ...)
 {
 	char body[EDWL_LOG_LINE_MAX];
+	char plain[EDWL_LOG_LINE_MAX + 32];
 	char line[EDWL_LOG_LINE_MAX + 128];
 	char stamp[64] = "";
 	va_list ap;
@@ -489,26 +627,26 @@ void edwl_log_msg(int level, const char *fmt, ...)
 	if (g_log.enabled && g_log.to_file)
 		format_stamp(stamp, sizeof(stamp));
 
-	n = snprintf(line, sizeof(line), "%s[%s] %s\n", stamp,
+	/* 终端那一份不带时间戳，文件那一份才带 */
+	n = snprintf(plain, sizeof(plain), "[%s] %s\n",
 		     edwl_log_level_name(level), body);
 	if (n < 0)
 		return;
-	if ((size_t)n >= sizeof(line))
-		line[sizeof(line) - 2] = '\n';
+	if ((size_t)n >= sizeof(plain))
+		plain[sizeof(plain) - 2] = '\n';
+	snprintf(line, sizeof(line), "%s%s", stamp, plain);
 
 	if (g_log.mtx)
 		edwl_mutex_lock(g_log.mtx);
 
 	if (g_log.enabled && g_log.to_console) {
 		if (level == EDWL_LOG_RESULT)
-			edwl_console_write(line);
+			edwl_console_write(plain);
 		else
-			edwl_console_write_err(line);
+			edwl_console_write_err(plain);
 	}
-	if (g_log.enabled && g_log.to_file && g_log.file) {
-		fputs(line, g_log.file);
-		fflush(g_log.file);
-	}
+	if (g_log.enabled && g_log.to_file)
+		log_enqueue(level, line);
 
 	if (g_log.mtx)
 		edwl_mutex_unlock(g_log.mtx);

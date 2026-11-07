@@ -5,6 +5,7 @@
  * 并发与限速选项。原则：只认命令行，不读任何全局配置。
  */
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -448,40 +449,86 @@ static int parse_args(int argc, char **argv, struct cli *c)
 
 /* ---------- 入口 ---------- */
 
+/* 统一走控制台层：Windows 下是 WriteConsoleW，避免 UTF-8 被当成 GBK */
+static void emit(const char *fmt, ...)
+{
+	char line[512];
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(line, sizeof(line), fmt, ap);
+	va_end(ap);
+	edwl_console_write(line);
+}
+
+/* 同名键出现在多个段时拒绝执行（例如 Enable 在三个段都有） */
+static int check_set_key_ambiguous(const char *pair)
+{
+	const char *eq = strchr(pair, '=');
+	char kbuf[64];
+	char secs[160];
+	char first[32];
+	char line[512];
+	size_t kl;
+	size_t fl = 0;
+
+	if (!eq)
+		return 0;
+	kl = (size_t)(eq - pair);
+	if (kl == 0 || kl >= sizeof(kbuf) || memchr(pair, '.', kl) != NULL)
+		return 0;
+	memcpy(kbuf, pair, kl);
+	kbuf[kl] = '\0';
+	if (edwl_config_key_sections(kbuf, secs, sizeof(secs)) <= 1)
+		return 0;
+
+	while (secs[fl] && secs[fl] != '/' && fl + 1 < sizeof(first)) {
+		first[fl] = secs[fl];
+		fl++;
+	}
+	first[fl] = '\0';
+	snprintf(line, sizeof(line),
+		 "edwl: %s 在多个段里都有（%s），请写清楚，例如 %s.%s\n", kbuf,
+		 secs, first, pair);
+	edwl_console_write_err(line);
+	return -1;
+}
+
 static void dump_config(const struct edwl_config *cfg, const char *path)
 {
 	const struct edwl_mirror_map *m;
 
-	printf("配置文件: %s\n", path);
-	printf("[General]\n");
-	printf("  Threads        = %d\n", cfg->threads);
-	printf("  DynamicThreads = %s\n", cfg->dynamic_threads ? "on" : "off");
-	printf("  MaxSpeed       = %d KB/s\n", cfg->max_speed);
-	printf("  MinSpeed       = %d KB/s\n", cfg->min_speed);
-	printf("  Timeout        = %d s\n", cfg->timeout);
-	printf("  Retries        = %d\n", cfg->retries);
-	printf("  RetryBackoff   = %s\n", cfg->retry_backoff);
-	printf("  OutputDir      = %s\n", cfg->output_dir);
-	printf("  ChunkSizeMB    = %d\n", cfg->chunk_size_mb);
-	printf("  UserAgent      = %s\n", cfg->user_agent);
-	printf("  ResumeFileExt  = %s\n", cfg->resume_ext);
-	printf("[Logging]\n");
-	printf("  Enable         = %s\n", cfg->log_enable ? "on" : "off");
-	printf("  Level          = %s\n", cfg->log_level);
-	printf("  Output         = %s\n", cfg->log_output);
-	printf("  FilePath       = %s\n", cfg->log_filepath);
-	printf("  Retention      = %s\n", cfg->log_retention);
-	printf("  TimeFormat     = %s\n", cfg->log_time_format);
-	printf("[Blacklist]\n");
-	printf("  Enable         = %s\n", cfg->blacklist_enable ? "on" : "off");
-	printf("  Hosts          = %s\n", cfg->blacklist_hosts);
-	printf("  IPs            = %s\n", cfg->blacklist_ips);
-	printf("[OpenSpeedy]\n");
-	printf("  Enable         = %s\n",
-	       cfg->openspeedy_enable ? "on" : "off");
-	printf("  SpeedMultiplier= %s\n", cfg->openspeedy_multiplier);
+	emit("配置文件: %s\n", path);
+	emit("[General]\n");
+	emit("  Threads        = %d\n", cfg->threads);
+	emit("  DynamicThreads = %s\n", cfg->dynamic_threads ? "on" : "off");
+	emit("  MaxSpeed       = %d KB/s\n", cfg->max_speed);
+	emit("  MinSpeed       = %d KB/s\n", cfg->min_speed);
+	emit("  Timeout        = %d s\n", cfg->timeout);
+	emit("  Retries        = %d\n", cfg->retries);
+	emit("  RetryBackoff   = %s\n", cfg->retry_backoff);
+	emit("  OutputDir      = %s\n", cfg->output_dir);
+	emit("  ChunkSizeMB    = %d\n", cfg->chunk_size_mb);
+	emit("  UserAgent      = %s\n", cfg->user_agent);
+	emit("  ResumeFileExt  = %s\n", cfg->resume_ext);
+	emit("[Logging]\n");
+	emit("  Enable         = %s\n", cfg->log_enable ? "on" : "off");
+	emit("  Level          = %s\n", cfg->log_level);
+	emit("  Output         = %s\n", cfg->log_output);
+	emit("  FilePath       = %s\n", cfg->log_filepath);
+	emit("  Retention      = %s\n", cfg->log_retention);
+	emit("  TimeFormat     = %s\n", cfg->log_time_format);
+	emit("[Blacklist]\n");
+	emit("  Enable         = %s\n", cfg->blacklist_enable ? "on" : "off");
+	emit("  Hosts          = %s\n", cfg->blacklist_hosts);
+	emit("  IPs            = %s\n", cfg->blacklist_ips);
+	emit("[OpenSpeedy]\n");
+	emit("  Enable         = %s\n", cfg->openspeedy_enable ? "on" : "off");
+	emit("  SpeedMultiplier= %s  (auto=按实测吞吐自动升降并发，最多 "
+	     "3x；数字=固定倍率)\n",
+	     cfg->openspeedy_multiplier);
 	for (m = cfg->mirrors; m; m = m->next)
-		printf("[Mirrors] %s = %s\n", m->original_host, m->mirrors);
+		emit("[Mirrors] %s = %s\n", m->original_host, m->mirrors);
 }
 
 static void report_bad_option(const struct cli *c)
@@ -678,6 +725,23 @@ int edwl_main(int argc, char **argv)
 		int k;
 
 		for (k = 0; k < c.set_count; k++) {
+			if (!strchr(c.sets[k], '=')) {
+				char line[512];
+
+				snprintf(line, sizeof(line),
+					 "edwl: -set 需要 KEY=VALUE 形式，例如 "
+					 "-set Threads=32（收到: %s）\n",
+					 c.sets[k]);
+				edwl_console_write_err(line);
+				edwl_config_free(&cfg);
+				edwl_console_shutdown();
+				return EDWL_EXIT_USAGE;
+			}
+			if (check_set_key_ambiguous(c.sets[k]) != 0) {
+				edwl_config_free(&cfg);
+				edwl_console_shutdown();
+				return EDWL_EXIT_USAGE;
+			}
 			if (edwl_config_set_file(path, c.sets[k]) != 0) {
 				char line[512];
 
@@ -689,7 +753,12 @@ int edwl_main(int argc, char **argv)
 				return EDWL_EXIT_USAGE;
 			}
 		}
-		printf("已写入配置: %s\n", path);
+		{
+			char line[512];
+
+			snprintf(line, sizeof(line), "已写入配置: %s\n", path);
+			edwl_console_write(line);
+		}
 		if (!c.config_ls) {
 			edwl_config_free(&cfg);
 			edwl_console_shutdown();
@@ -715,6 +784,22 @@ int edwl_main(int argc, char **argv)
 		const char *path = c.config_path ? c.config_path : "edwl.ini";
 		char line[512];
 
+		FILE *probe = fopen(path, "rb");
+
+		if (probe) {
+			char line[512];
+
+			fclose(probe);
+			snprintf(line, sizeof(line),
+				 "配置文件已存在，未覆盖: %s\n"
+				 "  要改值用 -set "
+				 "KEY=VALUE；想重置就先删掉这个文件\n",
+				 path);
+			edwl_console_write(line);
+			edwl_config_free(&cfg);
+			edwl_console_shutdown();
+			return EDWL_EXIT_OK;
+		}
 		if (edwl_config_generate(path) != 0) {
 			snprintf(line, sizeof(line), "edwl: 生成配置失败: %s\n",
 				 path);

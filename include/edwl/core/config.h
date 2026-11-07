@@ -87,6 +87,9 @@ void edwl_config_free(struct edwl_config *cfg);
  */
 int edwl_config_set_file(const char *path, const char *pair);
 
+/* 某个裸键名出现在哪些段里（给 -set 的歧义提示用），返回段数 */
+int edwl_config_key_sections(const char *key, char *out, size_t out_size);
+
 int edwl_config_parse_multiplier(const char *text, double *out, int *is_auto);
 
 /* 按原始域名找镜像行（大小写不敏感，精确匹配域名，不含端口） */

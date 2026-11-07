@@ -14,6 +14,7 @@
  *
  * 所有平台差异都在 platform/ 后面，本文件不出现任何系统头。
  */
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,13 @@ struct dl_state {
 	struct edwl_segment_map map;
 	struct edwl_mutex *mtx; /* 保护 map / single_done / 计数 */
 	edwl_file_t file;
+
+	/*
+	 * 高频计数用原子变量，不走锁也不走任务队列：
+	 * worker 每写一段就 atomic_fetch_add，监控线程低频读一下算差值即可。
+	 */
+	atomic_uint_fast64_t done_bytes;
+	atomic_uint_fast64_t done_pieces;
 
 	uint64_t total;
 	char output[PATH_LEN];
@@ -91,6 +99,8 @@ struct monitor {
 	uint64_t speed;
 	uint64_t last_adjust_ms;
 	uint64_t last_adjust_speed;
+	uint64_t win_ms;   /* 测速窗口起点 */
+	uint64_t win_done; /* 窗口起点的字节数 */
 };
 
 struct seg_io {
@@ -468,12 +478,6 @@ static int seg_write(void *ctx, const void *data, size_t len, uint64_t offset)
 	int64_t n;
 
 	if (offset < seg->begin || offset + len > seg->end + 1) {
-		/*
-		 * 服务器无视 Range
-		 * 回了整份文件：不要在这里中断（中断会弄脏复用的
-		 * 连接），把多出来的字节丢掉、让它正常收完，回头按
-		 * RANGE_IGNORED 重试。
-		 */
 		io->overflow = 1;
 		return -1;
 	}
@@ -486,6 +490,9 @@ static int seg_write(void *ctx, const void *data, size_t len, uint64_t offset)
 	if (offset + len > seg->pos)
 		seg->pos = offset + len;
 	edwl_mutex_unlock(st->mtx);
+
+	/* 高频路径：只做一次原子加，不碰锁 */
+	atomic_fetch_add_explicit(&st->done_bytes, len, memory_order_relaxed);
 	return 0;
 }
 
@@ -514,6 +521,8 @@ static int single_write(void *ctx, const void *data, size_t len,
 	edwl_mutex_lock(st->mtx);
 	st->single_done = offset + len;
 	edwl_mutex_unlock(st->mtx);
+
+	atomic_fetch_add_explicit(&st->done_bytes, len, memory_order_relaxed);
 	return 0;
 }
 
@@ -626,7 +635,8 @@ static int fetch_once(struct dl_state *st, struct edwl_segment *seg)
 		return EDWL_HTTP_ERR;
 
 	build_http_opts(st, &hopts, (unsigned)st->thread_cap);
-	if (edwl_http_open(&http, &hopts) != 0) {
+	/* 每个 worker 复用自己的连接，省掉每片一次 TLS 握手 */
+	if (edwl_http_thread_get(&hopts, &http) != 0) {
 		set_last_error(st, "无法创建 HTTP 句柄");
 		return EDWL_HTTP_ERR;
 	}
@@ -653,7 +663,8 @@ static int fetch_once(struct dl_state *st, struct edwl_segment *seg)
 	if (ret != EDWL_HTTP_OK)
 		snprintf(errbuf, sizeof(errbuf), "%s", edwl_http_error(http));
 
-	;
+	if (ret != EDWL_HTTP_OK && ret != EDWL_HTTP_ERR_INTERRUPTED)
+		edwl_http_thread_drop(); /* 复用中的连接可能已坏，下次重建 */
 
 	if (ret == EDWL_HTTP_OK) {
 		edwl_sources_report_ok(st->sources, src);
@@ -666,7 +677,7 @@ static int fetch_once(struct dl_state *st, struct edwl_segment *seg)
 			     (unsigned long long)seg->end, errbuf);
 	}
 
-	edwl_http_close(http);
+	/* 句柄留给本线程复用，线程退出时由 cleanup 统一释放 */
 	return ret;
 }
 
@@ -708,8 +719,10 @@ static int segment_run(struct dl_state *st, struct edwl_segment *seg)
 			seg->state = EDWL_SEG_DONE;
 			edwl_mutex_unlock(st->mtx);
 			record_piece_us(st, edwl_now_us() - started_us);
+			atomic_fetch_add_explicit(&st->done_pieces, 1,
+						  memory_order_relaxed);
 			edwl_log_msg(
-			    EDWL_LOG_PROGRESS, "分片 %llu 完成（%llu 字节）",
+			    EDWL_LOG_DEBUG, "分片 %llu 完成（%llu 字节）",
 			    (unsigned long long)seg->index,
 			    (unsigned long long)(seg->end - seg->begin + 1));
 			return 0;
@@ -756,29 +769,32 @@ static void pool_job(void *ctx, void *job)
 
 /* ---------- 进度 ---------- */
 
+/*
+ * 监控线程只做两次原子读，不拿锁、不遍历分片表。
+ * 100~200 ms 看一次，算差值就是瞬时速度。
+ */
 static void snapshot(struct dl_state *st, uint64_t *done, size_t *done_count)
 {
-	edwl_mutex_lock(st->mtx);
-	if (st->using_map) {
-		*done = edwl_segment_map_done(&st->map);
-		*done_count = edwl_segment_map_done_count(&st->map);
-	} else {
-		*done = st->single_done;
-		*done_count = 0;
-	}
-	edwl_mutex_unlock(st->mtx);
+	*done = atomic_load_explicit(&st->done_bytes, memory_order_relaxed);
+	*done_count = (size_t)atomic_load_explicit(&st->done_pieces,
+						   memory_order_relaxed);
 }
 
+/*
+ * 速度按 1 秒窗口算：限速时 libcurl 是一阵一阵给的，用单次 200ms 的差值
+ * 会算出离谱的瞬时值，窗口平均才靠谱。
+ */
 static void update_speed(struct monitor *mo, uint64_t done, uint64_t now)
 {
-	uint64_t dt = now - mo->last_ms;
-	uint64_t delta = done > mo->last_done ? done - mo->last_done : 0;
+	uint64_t dt = now - mo->win_ms;
+	uint64_t delta;
 
-	if (dt < TICK_MS)
+	if (dt < 1000)
 		return;
+	delta = done > mo->win_done ? done - mo->win_done : 0;
 	mo->speed = delta * 1000ULL / dt;
-	mo->last_ms = now;
-	mo->last_done = done;
+	mo->win_ms = now;
+	mo->win_done = done;
 }
 
 /*
@@ -823,9 +839,11 @@ static void draw_progress(struct monitor *mo, uint64_t done, size_t done_count,
 	struct edwl_progress p;
 	struct dl_state *st = mo->st;
 
-	if (!st->opts->show_progress)
-		return;
-	if (!edwl_log_allows(EDWL_LOG_PROGRESS))
+	/*
+	 * 进度条是 UI，不是日志：只要没 -q / --no-progress 就画，
+	 * 不再受 Logging.Level 影响（否则 Level=low 的用户完全看不到进度）。
+	 */
+	if (!st->opts->show_progress || st->opts->quiet)
 		return;
 	if (!edwl_console_tty() && now - mo->last_draw_ms < PLAIN_TICK_MS)
 		return;
@@ -886,9 +904,9 @@ static struct edwl_thread *monitor_start(struct monitor *mo,
 	memset(mo, 0, sizeof(*mo));
 	mo->st = st;
 	mo->start_ms = edwl_now_ms();
-	mo->last_ms = mo->start_ms;
+	mo->win_ms = mo->start_ms;
 	mo->last_draw_ms = 0;
-	snapshot(st, &mo->last_done, &ignored);
+	snapshot(st, &mo->win_done, &ignored);
 
 	if (edwl_thread_create(&t, monitor_main, mo) != 0)
 		return NULL;

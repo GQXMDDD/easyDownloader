@@ -93,19 +93,46 @@ static void set_offset(OVERLAPPED *ov, uint64_t offset)
 	ov->OffsetHigh = (DWORD)((offset >> 32) & 0xFFFFFFFFULL);
 }
 
+/*
+ * 每个线程一个自己的 event。
+ *
+ * 坑：OVERLAPPED.hEvent 为 NULL 时，GetOverlappedResult(..., TRUE) 等的是
+ * **文件句柄**，而句柄会被同一文件上任何一次 I/O 完成唤醒。多线程共用一个
+ * 文件句柄时，线程 A 可能被线程 B 的完成事件叫醒，随后读到自己那个还处于
+ * PENDING 的 InternalHigh（=0），把成功的写当成写了 0 字节。
+ * 给每次操作挂上本线程专属 event，等待才准。
+ */
+static HANDLE io_event(void)
+{
+	static _Thread_local HANDLE ev;
+
+	if (!ev)
+		ev = CreateEventA(NULL, FALSE, FALSE, NULL); /* 自动重置 */
+	return ev;
+}
+
 int64_t edwl_file_pwrite(edwl_file_t fd, const void *buf, size_t count,
 			 uint64_t offset)
 {
 	HANDLE h = as_handle(fd);
 	OVERLAPPED ov;
+	HANDLE ev;
 	DWORD written = 0;
+	DWORD err;
 
 	if (fd < 0 || count > 0x7FFFFFFFUL)
 		return -1;
 
+	ev = io_event();
+	if (!ev)
+		return -1;
+	ResetEvent(ev);
+
 	set_offset(&ov, offset);
+	ov.hEvent = ev;
 	if (!WriteFile(h, buf, (DWORD)count, &written, &ov)) {
-		if (GetLastError() != ERROR_IO_PENDING)
+		err = GetLastError();
+		if (err != ERROR_IO_PENDING)
 			return -1;
 		if (!GetOverlappedResult(h, &ov, &written, TRUE))
 			return -1;
@@ -117,6 +144,7 @@ int64_t edwl_file_pread(edwl_file_t fd, void *buf, size_t count,
 			uint64_t offset)
 {
 	HANDLE h = as_handle(fd);
+	HANDLE ev;
 	OVERLAPPED ov;
 	DWORD got = 0;
 	DWORD err;
@@ -124,7 +152,12 @@ int64_t edwl_file_pread(edwl_file_t fd, void *buf, size_t count,
 	if (fd < 0 || count > 0x7FFFFFFFUL)
 		return -1;
 
+	ev = io_event();
+	if (!ev)
+		return -1;
+	ResetEvent(ev);
 	set_offset(&ov, offset);
+	ov.hEvent = ev;
 	if (!ReadFile(h, buf, (DWORD)count, &got, &ov)) {
 		err = GetLastError();
 		/*
