@@ -107,7 +107,9 @@ static void usage(void)
 	    "其他:\n"
 	    "      --debug            打印调试日志\n"
 	    "  -h, --help             显示本帮助\n"
-	    "  -V, --version          显示版本\n";
+	    "  -V, --version          显示版本\n"
+	    "\n"
+	    "项目地址: " EDWL_PROJECT_URL "\n";
 
 	edwl_console_write(text);
 }
@@ -328,9 +330,9 @@ static int parse_args(int argc, char **argv, struct cli *c)
 
 			snprintf(line, sizeof(line),
 				 "%s %s\n多线程分片下载器（纯 C 实现）\n内置 "
-				 "HTTP 层: %s\n",
+				 "HTTP 层: %s\n项目地址: %s\n",
 				 EDWL_PROGRAM_NAME, edwl_version(),
-				 edwl_http_version());
+				 edwl_http_version(), EDWL_PROJECT_URL);
 			edwl_console_write(line);
 			return 1;
 		}
