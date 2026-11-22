@@ -32,10 +32,13 @@
 
 ```
 main
+ ├─ GitHub 仓库输入 → 官方 codeload 默认分支 ZIP URL
+ ├─ --release → latest API → 平台资产 → API digest/校验清单 → expected_sha256
  └─ edwl_download_run
      ├─ 1. resolve_output        URL → 输出文件名（+ .edwl 边车路径）
      ├─ 2. probe_any             逐个源发 Range: bytes=0-0
-     │      └─ 得到 total / range_supported / ETag / Last-Modified
+     │      ├─ 得到 total / range_supported / ETag / Last-Modified 后停止响应体
+     │      └─ 缓存最终 URL，下载失败时退回原始 URL 刷新 CDN 签名
      ├─ 3. 选择模式
      │      ├─ 并行：认 Range 且 total ≥ min_split 且 threads > 1
      │      └─ 单流：其余情况
@@ -109,8 +112,8 @@ piece <begin> <end> <pos>      ← 每片一行
   最多 `1 + retries` 次。重试用尽则该片回到 `PENDING`，最终收尾时判定失败。
 - **源健康度**：失败进入冷却（1s→2s→…→30s），成功立刻清零；`sources_pick()`
   轮转跳过冷却中的源。
-- **服务器无视 Range**（本该 206 却回 200）：立即置 `fatal`，停止并报错——
-  这种响应下按分片偏移写盘会直接写坏文件。
+- **服务器无视 Range**（本该 206 却回 200）：在写盘前拒绝响应体，换源重试；
+  不会把整文件按分片偏移写入，也不会推进断点。HTTP 错误页同样不会落盘。
 - **连接提前断开**（`EDWL_HTTP_ERR_SHORT`）：不算致命，`pos` 已前进，
   重试会从断点继续，最终拼出完整文件。
 - **本地写失败**：`EDWL_HTTP_ERR_LOCAL_IO`，按普通失败重试一次后放弃。

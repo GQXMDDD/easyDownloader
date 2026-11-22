@@ -25,4 +25,11 @@ int edwl_hash_equals(const char *a, const char *b);
 /* 是否是 64 位十六进制串（允许大小写） */
 int edwl_hash_is_valid(const char *hex);
 
+/*
+ * 从 GNU/BSD SHA-256 清单中查找指定文件；allow_bare 仅用于该文件的独立
+ * sidecar。 1 找到，0 未找到，-1 哈希冲突、匹配条目包含非法哈希或参数非法。
+ */
+int edwl_sha256_manifest(const char *text, const char *filename, int allow_bare,
+			 char out[EDWL_SHA256_HEX]);
+
 #endif /* EDWL_CORE_CHECKSUM_H */

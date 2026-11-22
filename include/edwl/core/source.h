@@ -30,6 +30,13 @@ int edwl_sources_pick(struct edwl_sources *s, size_t *index);
 /* 取第 index 个源的 URL，越界返回 NULL */
 const char *edwl_sources_url(struct edwl_sources *s, size_t index);
 
+/*
+ * 探测后缓存最终下载地址；只在 worker 启动前调用。0 成功，-1 失败。
+ * 下载失败时自动退回原始地址，以重新获取可能过期的 CDN 签名链接。
+ */
+int edwl_sources_set_effective_url(struct edwl_sources *s, size_t index,
+				   const char *url);
+
 /* 某个源成功一次：清零失败计数与冷却 */
 void edwl_sources_report_ok(struct edwl_sources *s, size_t index);
 

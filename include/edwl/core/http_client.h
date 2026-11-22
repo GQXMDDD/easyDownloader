@@ -24,6 +24,8 @@
 #define EDWL_HTTP_ERR_LEN 256
 
 struct edwl_http;
+struct edwl_buf;
+struct edwl_blacklist;
 
 struct edwl_http_opts {
 	const char *user_agent;	     /* NULL 用内置 UA */
@@ -34,6 +36,7 @@ struct edwl_http_opts {
 	const char *proxy;	     /* NULL 跟随环境变量；"" 表示强制直连 */
 	unsigned max_redirects;	     /* 0 用默认 10 */
 	int verbose;		     /* 1 = libcurl 详细调试输出 */
+	const struct edwl_blacklist *blacklist;
 };
 
 struct edwl_http_info {
@@ -83,7 +86,8 @@ void edwl_http_close(struct edwl_http *h);
 
 /*
  * 探测：用 Range: bytes=0-0 发一个 GET，拿状态码、总长、是否支持 Range、
- * ETag/Last-Modified。服务器回 200 说明不支持 Range（但总长仍可取）。
+ * ETag/Last-Modified。拿完最终响应头即停止，不下载并丢弃完整响应体。
+ * 服务器回 200 说明不支持 Range（但总长仍可取）。
  */
 int edwl_http_probe(struct edwl_http *h, const char *url,
 		    struct edwl_http_info *info);
@@ -101,5 +105,9 @@ int edwl_http_get_range(struct edwl_http *h, const char *url, uint64_t begin,
 /* 整文件下载（服务器不支持 Range 或用户禁用分片时的回退路径） */
 int edwl_http_get_all(struct edwl_http *h, const char *url,
 		      const struct edwl_http_sink *sink, uint64_t *got);
+
+/* 小型文本响应；buf 必须已初始化，max_size 限制内存，每次跳转前检查黑名单。 */
+int edwl_http_get_text(struct edwl_http *h, const char *url, const char *accept,
+		       size_t max_size, struct edwl_buf *buf);
 
 #endif /* EDWL_CORE_HTTP_CLIENT_H */

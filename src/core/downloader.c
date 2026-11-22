@@ -593,6 +593,21 @@ static void slot_release(struct dl_state *st)
 
 static int fetch_once(struct dl_state *st, struct edwl_segment *seg);
 
+static int pick_source(struct dl_state *st, size_t *index)
+{
+	while (!edwl_interrupt_requested() && !st->fatal) {
+		uint64_t wait;
+
+		if (edwl_sources_pick(st->sources, index) == 1)
+			return 1;
+		wait = edwl_sources_cooldown_left(st->sources);
+		if (wait == 0)
+			continue;
+		edwl_sleep_ms((uint32_t)(wait < 100 ? wait : 100));
+	}
+	return 0;
+}
+
 static int fetch_attempt(struct dl_state *st, struct edwl_segment *seg)
 {
 	int rc;
@@ -616,19 +631,10 @@ static int fetch_once(struct dl_state *st, struct edwl_segment *seg)
 	char errbuf[EDWL_HTTP_ERR_LEN] = "";
 	int ret;
 
-	if (edwl_sources_pick(st->sources, &src) != 1) {
-		uint64_t wait = edwl_sources_cooldown_left(st->sources);
-
-		if (wait > 0 && wait <= 2000) {
-			edwl_sleep_ms((uint32_t)wait + 20);
-			if (edwl_sources_pick(st->sources, &src) != 1) {
-				set_last_error(st, "所有源都在冷却中");
-				return EDWL_HTTP_ERR;
-			}
-		} else {
-			set_last_error(st, "所有源都在冷却中");
-			return EDWL_HTTP_ERR;
-		}
+	if (pick_source(st, &src) != 1) {
+		set_last_error(st, "没有可用的下载源或已中断");
+		return edwl_interrupt_requested() ? EDWL_HTTP_ERR_INTERRUPTED
+						  : EDWL_HTTP_ERR;
 	}
 	url = edwl_sources_url(st->sources, src);
 	if (!url)
@@ -928,6 +934,38 @@ static void monitor_stop(struct monitor *mo, struct edwl_thread *t)
 
 /* ---------- 探测 ---------- */
 
+/* 跳转后的地址是否被黑名单拦下；命中时记下原因 */
+static int redirect_blocked(struct dl_state *st,
+			    const struct edwl_http_info *info)
+{
+	char why[256];
+
+	if (!st->opts->blacklist || !info->effective_url[0])
+		return 0;
+	if (!edwl_blacklist_hit_url(st->opts->blacklist, info->effective_url,
+				    why, sizeof(why)))
+		return 0;
+	set_last_error(st, why);
+	edwl_log_msg(EDWL_LOG_WARN, "跳转后的地址被黑名单拦下：%s（%s）",
+		     info->effective_url, why);
+	return 1;
+}
+
+/* 跳转后的地址与原始地址不同时缓存下来，让分片直接用它 */
+static int cache_effective_url(struct dl_state *st, size_t src, const char *url,
+			       const struct edwl_http_info *info)
+{
+	if (!info->effective_url[0] || strcmp(url, info->effective_url) == 0)
+		return 0;
+	if (edwl_sources_set_effective_url(st->sources, src,
+					   info->effective_url) != 0) {
+		set_last_error(st, "无法缓存最终下载地址");
+		return -1;
+	}
+	edwl_log_msg(EDWL_LOG_DEBUG, "复用最终下载地址，避免分片重复跳转");
+	return 0;
+}
+
 static int probe_any(struct dl_state *st, struct edwl_http_info *info)
 {
 	struct edwl_http *http = NULL;
@@ -965,6 +1003,14 @@ static int probe_any(struct dl_state *st, struct edwl_http_info *info)
 
 		ret = edwl_http_probe(http, url, info);
 		if (ret == EDWL_HTTP_OK) {
+			if (redirect_blocked(st, info)) {
+				edwl_sources_report_fail(st->sources, src);
+				continue;
+			}
+			if (cache_effective_url(st, src, url, info) != 0) {
+				edwl_http_close(http);
+				return -1;
+			}
 			edwl_sources_report_ok(st->sources, src);
 			edwl_http_close(http);
 			return 0;
@@ -1124,7 +1170,7 @@ static int single_download(struct dl_state *st)
 
 		if (edwl_interrupt_requested() || st->fatal)
 			break;
-		if (edwl_sources_pick(st->sources, &src) != 1) {
+		if (pick_source(st, &src) != 1) {
 			if (!st->last_error[0])
 				set_last_error(st, "所有源都在冷却中");
 			break;
@@ -1264,6 +1310,7 @@ int edwl_download_run(const struct edwl_download_opts *opts,
 		      struct edwl_download_result *result)
 {
 	struct edwl_download_opts local;
+	const char *allowed[32];
 	struct edwl_http_info info;
 	struct dl_state st;
 	int can_range = 0;
@@ -1279,7 +1326,6 @@ int edwl_download_run(const struct edwl_download_opts *opts,
 
 	/* 黑名单：先把不该访问的目标摘掉，一个字节都不发 */
 	if (local.blacklist && local.url_count > 0) {
-		const char *allowed[32];
 		size_t kept = 0;
 		size_t i;
 
@@ -1301,7 +1347,7 @@ int edwl_download_run(const struct edwl_download_opts *opts,
 				     "所有地址都被黑名单拦下，已退出");
 			return EDWL_EXIT_ERROR;
 		}
-		local.urls = (const char *const *)allowed;
+		local.urls = allowed;
 		local.url_count = kept;
 	}
 

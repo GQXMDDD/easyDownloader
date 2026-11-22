@@ -72,6 +72,81 @@ static void test_filename(void)
 	CHECK_STR(name, "index.html");
 }
 
+static void test_github_repository(void)
+{
+	static const char *inputs[] = {
+	    "octocat/Hello-World.git",
+	    "octocat/Hello-World",
+	    "octocat/Hello-World.git/",
+	    "github.com/octocat/Hello-World.git",
+	    "git@github.com:octocat/Hello-World.git",
+	    "https://github.com/octocat/Hello-World.git",
+	    "https://GITHUB.com/octocat/Hello-World/?tab=readme#top",
+	};
+	static const char *unchanged[] = {
+	    "https://example.com/owner/repo.git",
+	    "https://github.com/owner/repo/releases/download/v1/app.zip?x=1",
+	    "https://github.com/owner/repo/archive/refs/heads/main.zip",
+	    "https://raw.githubusercontent.com/owner/repo/main/file.c",
+	    "https://github.com/owner/repo/blob/main/file.c",
+	    "https://github.com.evil.example/owner/repo.git",
+	};
+	static const char *invalid[] = {
+	    "",
+	    "owner",
+	    "/repo.git",
+	    "owner/.git",
+	    "owner/../repo.git",
+	    "owner/repo.git/extra",
+	    "owner/repo.git?x=1",
+	    "-owner/repo.git",
+	    "owner/re po.git",
+	    "owner\\repo.git",
+	    "ftp://github.com/owner/repo.git",
+	};
+	char url[EDWL_URL_MAX];
+	char name[128];
+	size_t i;
+
+	for (i = 0; i < sizeof(inputs) / sizeof(inputs[0]); i++) {
+		CHECK_INT(
+		    edwl_url_normalize_github(inputs[i], url, sizeof(url)), 1);
+		CHECK_STR(
+		    url,
+		    "https://codeload.github.com/octocat/Hello-World/zip/HEAD");
+		CHECK_INT(edwl_url_guess_filename(url, name, sizeof(name)), 0);
+		CHECK_STR(name, "Hello-World.zip");
+	}
+	for (i = 0; i < sizeof(unchanged) / sizeof(unchanged[0]); i++) {
+		CHECK_INT(
+		    edwl_url_normalize_github(unchanged[i], url, sizeof(url)),
+		    0);
+		CHECK_STR(url, unchanged[i]);
+	}
+	for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+		CHECK_INT(
+		    edwl_url_normalize_github(invalid[i], url, sizeof(url)),
+		    -1);
+	CHECK_INT(edwl_url_normalize_github("owner/repo.git", url, 8), -1);
+	CHECK_INT(edwl_url_guess_filename(
+		      "https://github.com/owner/repo/archive/HEAD.zip", name,
+		      sizeof(name)),
+		  0);
+	CHECK_STR(name, "repo.zip");
+	CHECK_INT(edwl_url_github_repo("github.com/octocat/Hello-World.git",
+				       name, sizeof(name)),
+		  0);
+	CHECK_STR(name, "octocat/Hello-World");
+	CHECK_INT(edwl_url_github_repo("https://example.com/owner/repo.git",
+				       name, sizeof(name)),
+		  -1);
+	CHECK_INT(
+	    edwl_url_normalize_github("owner/repo.git.git", url, sizeof(url)),
+	    1);
+	CHECK_INT(edwl_url_guess_filename(url, name, sizeof(name)), 0);
+	CHECK_STR(name, "repo.git.zip");
+}
+
 static void test_sanitize(void)
 {
 	char out[64];
@@ -116,6 +191,7 @@ int main(void)
 	test_parse_empty_path();
 	test_parse_rejects();
 	test_filename();
+	test_github_repository();
 	test_sanitize();
 	test_range();
 	test_content_range();

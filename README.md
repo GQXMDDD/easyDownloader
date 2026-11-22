@@ -17,6 +17,7 @@
 - **断点续传**：`.edwl` 边车文件记录每片进度，`Ctrl-C` / 崩溃后可续
 - **限速与超时**：走 libcurl 的传输选项（`MAX_RECV_SPEED`、低速判定）
 - **单流回退**：服务器不认 Range 时自动退回单连接顺序下载
+- **GitHub 仓库短地址**：`owner/repo.git`、`owner/repo` 或完整仓库地址自动下载默认分支 ZIP
 - **跨平台**：平台差异全部隔离在 `platform/{posix,win32}/`，核心层零系统头
 
 ---
@@ -90,7 +91,7 @@ cmake --build build
 
 ## 用法
 
-```
+```text
 edwl [选项] URL [镜像URL ...]
 ```
 
@@ -108,6 +109,97 @@ edwl --max-speed 2M -t 5 -O x.zip https://example.com/x.zip
 edwl --no-range -O y.bin https://example.com/y.bin
 ```
 
+### 常用命令速查
+
+```bash
+# 断点续传：中断后重跑同一条命令即可（进度记在 <文件名>.edwl）
+edwl -O big.iso https://example.com/big.iso
+
+# 下载 GitHub 最新正式 Release：自动按平台挑资产 + 自动校验 SHA-256
+edwl --release GQXMDDD/easyDownloader -O edwl.exe
+
+# 指定资产名（比如取别的平台的文件），仍然自动取 digest 校验
+edwl --release --asset tangram-linux-x64.AppImage \
+     -O tangram.AppImage 3477856804/tangram-agent-releases
+
+# 只有直链、拿不到 release 元数据时，自己给哈希
+edwl --sha256 89efe2f6e1da6e9205c836955a105d23f8de2e62e3090326efa7dad5ac11e60f \
+     -O tangram.AppImage \
+     https://github.com/3477856804/tangram-agent-releases/releases/latest/download/tangram-linux-x64.AppImage
+
+# 配置：生成 / 查看 / 改（改了立刻生效，下次运行读取）
+edwl --config                    # 生成 edwl.ini；已存在不会覆盖
+edwl --config ls                 # 打印当前生效配置
+edwl -set Threads=32             # 改并发
+edwl -set Blacklist.Enable=off   # Enable 在三个段都有，必须带段名
+edwl -set Logging.Level=high     # off / low / high / max
+```
+
+校验失败会以退出码 `3` 结束；续传、限速、镜像与校验可以自由组合，例如：
+
+```bash
+edwl -j 16 --max-speed 8M --sha256 <64位十六进制> -O big.bin \
+     https://a/big.bin https://b/big.bin
+```
+
+### GitHub 下载
+
+```powershell
+# 自动保存为 easyDownloader.zip，下载默认分支，不假设分支叫 main/master
+edwl GQXMDDD/easyDownloader.git
+edwl https://github.com/GQXMDDD/easyDownloader.git
+
+# 仍可指定输出名、代理；不会修改系统代理设置
+edwl --proxy http://127.0.0.1:7890 -O source.zip GQXMDDD/easyDownloader
+```
+
+仓库地址会转换为 GitHub 官方 `codeload.github.com/<owner>/<repo>/zip/HEAD`，
+下载源码快照，不执行 `git clone`，也不包含 Git 历史。普通文件、Release 资产、
+raw 文件和指定分支/标签的 archive 地址保持原样。
+
+探测只读取最终响应头，不再把不支持 Range 的整个文件下载后丢弃；
+已探测到的最终地址用于后续分片，减少 GitHub → CDN 的重复跳转和握手。
+如果 CDN 签名链接过期或连接失败，会回到原始地址重新请求，错误响应不会写进文件。
+接收缓冲区使用 256 KiB，worker 继续复用各自的连接。
+
+源码 ZIP 通常不支持 Range，因此仍使用单连接；不会虚报多线程加速。
+实际速度受网络、GitHub/CDN 限流和代理影响，增加线程不能解决所有线路问题。
+镜像模板默认注释，不会自动访问第三方服务；需要时只配置自己信任的真实镜像，
+源码包的镜像映射应使用 `codeload.github.com` 作为原始域名。
+
+### 最新 Release 与自动校验
+
+```powershell
+# 下载最新正式 Release，自动匹配当前平台/架构的资产并校验 SHA-256
+edwl --release -O edwl-latest.exe GQXMDDD/easyDownloader.git
+
+# 多个候选无法唯一匹配时，用精确文件名选择（--asset 隐含 --release）
+edwl --asset edwl.exe -O edwl-latest.exe GQXMDDD/easyDownloader
+```
+
+只查询 GitHub 标记的 latest 正式 Release，不选择草稿或预发布，不会自动运行下载的文件。
+下载本工具自身的 Release 时应指定不同的输出名，避免覆盖正在运行的程序。
+自动匹配优先带当前操作系统、架构标记的资产，跳过源码、签名和校验清单；
+命名不标准或存在同分候选时显式报错，请使用 `--asset NAME`。
+
+哈希查找顺序：
+
+1. 显式 `--sha256 HEX`（命令行优先）；
+2. GitHub API 的资产 `digest`（`sha256:...`）；
+3. 同名 `.sha256` / `.sha256sum` / `.sha256.txt` 文件；
+4. Release 内的 `SHA256SUMS` / `checksums` 清单；
+5. Release 说明里的精确文件名 + SHA-256 条目。
+
+清单支持 GNU `hash  filename`、BSD `SHA256 (filename) = hash`，以及
+`filename  SHA-256: hash`，也支持 Release 说明中的文件名/哈希 Markdown 表格。
+只匹配所选资产名，避免误用其它文件的哈希；
+相互冲突或格式非法的匹配条目会报错。找不到哈希时停止下载并提示使用 `--sha256`，
+不会静默跳过校验。
+哈希不匹配沿用退出码 `3`；哈希验证完整性，不替代发布者身份/签名验证。
+
+API 和校验文本只通过 HTTPS 获取，复用命令行代理和黑名单，响应限制为 4 MiB；
+当前模式面向公开仓库，API 限流或没有正式 Release 时会显式报错。
+
 | 选项 | 说明 |
 |---|---|
 | `-O, --output FILE` | 输出文件名；以 `/` 结尾时视为目录 |
@@ -120,6 +212,8 @@ edwl --no-range -O y.bin https://example.com/y.bin
 | `-c, --continue` | 断点续传（默认开启，仅为兼容 wget） |
 | `--no-resume` | 忽略断点，从头下 |
 | `--sha256 HEX` | 下载完成后校验整文件 SHA-256 |
+| `--release` / `--latest-release` | 下载 GitHub 最新正式 Release，自动选择资产和 SHA-256 校验 |
+| `--asset NAME` | 精确选择 Release 资产名，隐含 `--release` |
 | `--no-range` | 禁用分片，强制单连接 |
 | `--proxy URL` / `--no-proxy` | 指定代理 / 忽略环境变量代理 |
 | `--config` | 生成默认配置文件（已存在则不动，避免冲掉你的修改） |
@@ -230,7 +324,7 @@ piece 0 786431 589824        # begin end next_pos
 include/edwl/
   edwl.h                 公共 API（edwl_main / edwl_version）
   core/                   downloader / segment / task_queue / thread_pool /
-                          http_client / source / checksum
+                          http_client / source / checksum / github_release
   platform/               platform.h 统一入口 + file_io/thread/time/console
   util/                   log / buffer / url
 src/

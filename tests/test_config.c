@@ -105,7 +105,6 @@ static void test_missing_file(void)
 static void test_generate(void)
 {
 	struct edwl_config cfg;
-	const struct edwl_mirror_map *m;
 	int rc;
 
 	remove(TMP_INI);
@@ -119,8 +118,7 @@ static void test_generate(void)
 	CHECK_STR(cfg.log_level, "high");
 	CHECK_INT(cfg.blacklist_enable, 1);
 	CHECK(strstr(cfg.blacklist_hosts, "localhost") != NULL);
-	m = edwl_config_find_mirrors(&cfg, "github.com");
-	CHECK(m != NULL);
+	CHECK(!cfg.mirrors);
 
 	edwl_config_free(&cfg);
 	remove(TMP_INI);

@@ -16,6 +16,7 @@ set(EDWL_LIB_SOURCES
 	src/core/blacklist.c
 	src/core/checksum.c
 	src/core/downloader.c
+	src/core/github_release.c
 	src/core/http_client.c
 	src/core/segment.c
 	src/core/source.c
@@ -168,12 +169,16 @@ install(TARGETS edwl RUNTIME DESTINATION bin)
 if(EDWL_BUILD_TESTS)
 	enable_testing()
 	foreach(tname test_url test_segment test_queue test_checksum test_file_io
-	             test_config test_blacklist)
+	             test_config test_blacklist test_http test_github_release)
 		add_executable(${tname} tests/${tname}.c)
 		target_link_libraries(${tname} PRIVATE edwl_lib)
 		target_include_directories(${tname} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 		add_test(NAME ${tname} COMMAND ${tname})
 	endforeach()
+	if(WIN32)
+		target_link_libraries(test_http PRIVATE ws2_32)
+	endif()
+	set_tests_properties(test_http PROPERTIES TIMEOUT 30)
 endif()
 
 message(STATUS "edwl: libcurl 后端 = ${EDWL_CURL_BACKEND}")

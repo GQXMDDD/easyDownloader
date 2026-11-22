@@ -25,6 +25,15 @@ struct edwl_url {
  */
 int edwl_url_parse(const char *url, struct edwl_url *out);
 
+/*
+ * GitHub owner/repo[.git] 或仓库地址 → 默认分支 ZIP 的 HTTPS 地址。
+ * 返回 1 表示已转换，0 表示保留普通 HTTP(S) URL，-1 表示输入或缓冲区非法。
+ */
+int edwl_url_normalize_github(const char *input, char *out, size_t out_size);
+
+/* 从支持的 GitHub 仓库输入取 owner/repo。0 成功，-1 不是仓库或空间不足。 */
+int edwl_url_github_repo(const char *input, char *out, size_t out_size);
+
 /* 按 scheme 取默认端口 */
 int edwl_url_default_port(const char *scheme);
 

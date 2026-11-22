@@ -208,6 +208,123 @@ int edwl_url_is_absolute(const char *url)
 	return (size_t)(sep - url) < 8;
 }
 
+static int ci_equal(const char *a, const char *b)
+{
+	while (*a && *b) {
+		if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+			return 0;
+		a++;
+		b++;
+	}
+	return *a == '\0' && *b == '\0';
+}
+
+static int github_repo_parts(const char *path, size_t len, int strip_git,
+			     size_t *owner_len, size_t *repo_len)
+{
+	const char *slash;
+	const char *repo;
+	size_t i;
+
+	if (len > 0 && path[len - 1] == '/')
+		len--;
+	slash = memchr(path, '/', len);
+	if (!slash)
+		return -1;
+	*owner_len = (size_t)(slash - path);
+	*repo_len = len - *owner_len - 1;
+	repo = slash + 1;
+	if (strip_git && *repo_len >= 4 &&
+	    memcmp(repo + *repo_len - 4, ".git", 4) == 0)
+		*repo_len -= 4;
+	if (*owner_len == 0 || *owner_len > 39 || *repo_len == 0 ||
+	    *repo_len > 100)
+		return -1;
+	if (!isalnum((unsigned char)path[0]) ||
+	    !isalnum((unsigned char)path[*owner_len - 1]))
+		return -1;
+	for (i = 0; i < *owner_len; i++) {
+		unsigned char c = (unsigned char)path[i];
+
+		if (c > 127 || (!isalnum(c) && c != '-'))
+			return -1;
+	}
+	for (i = 0; i < *repo_len; i++) {
+		unsigned char c = (unsigned char)repo[i];
+
+		if (c > 127 ||
+		    (!isalnum(c) && c != '-' && c != '_' && c != '.'))
+			return -1;
+	}
+	if ((*repo_len == 1 && repo[0] == '.') ||
+	    (*repo_len == 2 && repo[0] == '.' && repo[1] == '.'))
+		return -1;
+	return 0;
+}
+
+int edwl_url_normalize_github(const char *input, char *out, size_t out_size)
+{
+	struct edwl_url parsed;
+	const char *path = input;
+	const char *sep;
+	size_t len;
+	size_t owner_len;
+	size_t repo_len;
+	int n;
+
+	if (!input || !out || out_size == 0)
+		return -1;
+	out[0] = '\0';
+	sep = strstr(input, "://");
+	if (sep) {
+		if (edwl_url_parse(input, &parsed) != 0)
+			return -1;
+		path = parsed.path + 1;
+		len = strcspn(path, "?#");
+		if (!ci_equal(parsed.host, "github.com") ||
+		    parsed.port != edwl_url_default_port(parsed.scheme) ||
+		    memchr(sep + 3, '@', strcspn(sep + 3, "/?#")) ||
+		    github_repo_parts(path, len, 1, &owner_len, &repo_len) !=
+			0) {
+			n = snprintf(out, out_size, "%s", input);
+			return n < 0 || (size_t)n >= out_size ? -1 : 0;
+		}
+	} else {
+		if (strncmp(input, "github.com/", 11) == 0)
+			path = input + 11;
+		else if (strncmp(input, "git@github.com:", 15) == 0)
+			path = input + 15;
+		if (github_repo_parts(path, strlen(path), 1, &owner_len,
+				      &repo_len) != 0)
+			return -1;
+	}
+
+	/* HEAD 跟随仓库的默认分支，不假设它叫 main 或 master。 */
+	n = snprintf(out, out_size,
+		     "https://codeload.github.com/%.*s/%.*s/zip/HEAD",
+		     (int)owner_len, path, (int)repo_len, path + owner_len + 1);
+	return n < 0 || (size_t)n >= out_size ? -1 : 1;
+}
+
+int edwl_url_github_repo(const char *input, char *out, size_t out_size)
+{
+	char normalized[EDWL_URL_MAX];
+	struct edwl_url parsed;
+	size_t len;
+
+	if (!out || out_size == 0 ||
+	    edwl_url_normalize_github(input, normalized, sizeof(normalized)) !=
+		1 ||
+	    edwl_url_parse(normalized, &parsed) != 0)
+		return -1;
+	len = strlen(parsed.path) - strlen("/zip/HEAD") - 1;
+	if (len >= out_size)
+		return -1;
+	memcpy(out, parsed.path + 1, len);
+	out[len] = '\0';
+	return 0;
+}
+
 static int percent_decode(const char *in, char *out, size_t out_size)
 {
 	size_t oi = 0;
@@ -262,6 +379,7 @@ int edwl_url_sanitize_filename(const char *in, char *out, size_t out_size)
 int edwl_url_guess_filename(const char *url, char *out, size_t out_size)
 {
 	struct edwl_url parsed;
+	const char *archive_suffix = NULL;
 	char decoded[512];
 	const char *path;
 	const char *query;
@@ -278,6 +396,26 @@ int edwl_url_guess_filename(const char *url, char *out, size_t out_size)
 	/* 路径里带查询串的话，文件名只取 '?' 前面那段 */
 	query = strchr(parsed.path, '?');
 	len = query ? (size_t)(query - parsed.path) : strlen(parsed.path);
+	if (ci_equal(parsed.host, "github.com"))
+		archive_suffix = "/archive/HEAD.zip";
+	else if (ci_equal(parsed.host, "codeload.github.com"))
+		archive_suffix = "/zip/HEAD";
+	if (archive_suffix && len > strlen(archive_suffix) + 1 &&
+	    memcmp(parsed.path + len - strlen(archive_suffix), archive_suffix,
+		   strlen(archive_suffix)) == 0) {
+		size_t owner_len;
+		size_t repo_len;
+
+		if (github_repo_parts(parsed.path + 1,
+				      len - strlen(archive_suffix) - 1, 0,
+				      &owner_len, &repo_len) == 0) {
+			int n =
+			    snprintf(out, out_size, "%.*s.zip", (int)repo_len,
+				     parsed.path + owner_len + 2);
+
+			return n < 0 || (size_t)n >= out_size ? -1 : 0;
+		}
+	}
 	if (len >= sizeof(decoded))
 		return -1;
 	memcpy(decoded, parsed.path, len);

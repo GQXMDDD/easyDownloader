@@ -745,8 +745,9 @@ int edwl_config_generate(const char *path)
 	    "; ==========================================\n"
 	    "\n"
 	    "[Mirrors]\n"
-	    "github.com = githubmirror1.com, mirror2.com\n"
-	    "raw.githubusercontent.com = "
+	    "; 示例默认不启用，请替换为自己信任的真实镜像再取消注释。\n"
+	    "; github.com = githubmirror1.com, mirror2.com\n"
+	    "; raw.githubusercontent.com = "
 	    "ghproxy.com/raw.githubusercontent.com\n";
 	FILE *f;
 	int rc;

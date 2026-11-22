@@ -289,3 +289,176 @@ int edwl_hash_is_valid(const char *hex)
 	}
 	return 1;
 }
+
+static int manifest_filename(const char *begin, const char *end,
+			     const char *filename)
+{
+	while (begin < end && (*begin == ' ' || *begin == '\t'))
+		begin++;
+	while (end > begin &&
+	       (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r'))
+		end--;
+	if (begin < end && *begin == '*')
+		begin++;
+	if (end - begin >= 2 && begin[0] == '`' && end[-1] == '`') {
+		begin++;
+		end--;
+	}
+	if (end - begin >= 2 && begin[0] == '.' && begin[1] == '/')
+		begin += 2;
+	return (size_t)(end - begin) == strlen(filename) &&
+	       memcmp(begin, filename, (size_t)(end - begin)) == 0;
+}
+
+static int manifest_hash(const char *begin, const char *end,
+			 char out[EDWL_SHA256_HEX])
+{
+	while (begin < end && (*begin == ' ' || *begin == '\t'))
+		begin++;
+	while (end > begin &&
+	       (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r'))
+		end--;
+	if (end - begin >= 2 && begin[0] == '`' && end[-1] == '`') {
+		begin++;
+		end--;
+	}
+	if (end - begin != 64)
+		return 0;
+	memcpy(out, begin, 64);
+	out[64] = '\0';
+	return edwl_hash_is_valid(out);
+}
+
+static const char *skip_ws(const char *p, const char *end)
+{
+	while (p < end && (*p == ' ' || *p == '\t'))
+		p++;
+	return p;
+}
+
+static const char *rtrim_ws(const char *p, const char *end)
+{
+	while (end > p &&
+	       (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r'))
+		end--;
+	return end;
+}
+
+/* "SHA-256: <hash> <file>"：命中且文件名匹配时给出哈希起点和行尾 */
+static int parse_marked_line(const char *line, const char *end,
+			     const char *filename, const char **hash_out,
+			     const char **end_out)
+{
+	const char *q;
+
+	for (q = line; end - q >= 9; q++) {
+		if (memcmp(q, "SHA-256:", 8) != 0)
+			continue;
+		if (!manifest_filename(line, q, filename))
+			return 0;
+		*hash_out = skip_ws(q + 8, end);
+		*end_out = rtrim_ws(*hash_out, end);
+		return 1;
+	}
+	return 0;
+}
+
+/* "SHA256 (file) = <hash>" */
+static int parse_gnu_line(const char *line, const char *end,
+			  const char *filename, const char **hash_out,
+			  const char **end_out)
+{
+	const char *p = skip_ws(line, end);
+	const char *close;
+
+	if (end - p <= 8 || memcmp(p, "SHA256 (", 8) != 0)
+		return 0;
+	close = p + 8;
+	while (close < end && *close != ')')
+		close++;
+	if (close >= end || !manifest_filename(p + 8, close, filename))
+		return 0;
+	p = skip_ws(close + 1, end);
+	if (p >= end || *p != '=')
+		return 0;
+	*hash_out = skip_ws(p + 1, end);
+	*end_out = rtrim_ws(*hash_out, end);
+	return 1;
+}
+
+int edwl_sha256_manifest(const char *text, const char *filename, int allow_bare,
+			 char out[EDWL_SHA256_HEX])
+{
+	const char *line;
+	int found = 0;
+
+	if (!text || !filename || !out)
+		return -1;
+	out[0] = '\0';
+	line = text;
+	if (strlen(text) >= 3 && memcmp(text, "\xef\xbb\xbf", 3) == 0)
+		line += 3;
+	while (*line) {
+		const char *end = strchr(line, '\n');
+		const char *p = line;
+		const char *hash = NULL;
+		char candidate[EDWL_SHA256_HEX];
+		int matches = 0;
+
+		if (!end)
+			end = line + strlen(line);
+		while (p < end && (*p == ' ' || *p == '\t'))
+			p++;
+		if (p < end && *p == '|') {
+			const char *middle =
+			    memchr(p + 1, '|', (size_t)(end - p - 1));
+			const char *last =
+			    middle ? memchr(middle + 1, '|',
+					    (size_t)(end - middle - 1))
+				   : NULL;
+
+			if (last &&
+			    ((manifest_filename(p + 1, middle, filename) &&
+			      manifest_hash(middle + 1, last, candidate)) ||
+			     (manifest_filename(middle + 1, last, filename) &&
+			      manifest_hash(p + 1, middle, candidate)))) {
+				if (found && !edwl_hash_equals(out, candidate))
+					return -1;
+				memcpy(out, candidate, sizeof(candidate));
+				found = 1;
+			}
+		}
+		if (end - p >= 64) {
+			hash = p;
+			p += 64;
+			if (p == end || *p == ' ' || *p == '\t' || *p == '\r') {
+				while (p < end &&
+				       (*p == ' ' || *p == '\t' || *p == '\r'))
+					p++;
+				matches =
+				    p == end
+					? allow_bare
+					: manifest_filename(p, end, filename);
+			}
+		}
+		p = line;
+		if (parse_marked_line(line, end, filename, &hash, &end))
+			matches = end - hash == 64;
+		if (parse_gnu_line(line, end, filename, &hash, &end))
+			matches = end - hash == 64;
+		if (matches && hash) {
+			memcpy(candidate, hash, 64);
+			candidate[64] = '\0';
+			if (!edwl_hash_is_valid(candidate) ||
+			    (found && !edwl_hash_equals(out, candidate)))
+				return -1;
+			memcpy(out, candidate, sizeof(candidate));
+			found = 1;
+		}
+		line = strchr(line, '\n');
+		if (!line)
+			break;
+		line++;
+	}
+	return found;
+}

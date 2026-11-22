@@ -14,6 +14,7 @@
 #include <edwl/core/checksum.h>
 #include <edwl/core/config.h>
 #include <edwl/core/downloader.h>
+#include <edwl/core/github_release.h>
 #include <edwl/core/http_client.h>
 #include <edwl/platform/platform.h>
 #include <edwl/util/log.h>
@@ -51,6 +52,8 @@ struct cli {
 	int no_blacklist;
 	int wait_exit;
 	int config_ls;
+	int latest_release;
+	const char *release_asset;
 	const char *sets[16];
 	int set_count;
 	unsigned set;
@@ -68,6 +71,10 @@ static void usage(void)
 	    "\n"
 	    "同一个文件有多个地址时，把它们都写在后面即可，程序会把它们\n"
 	    "当作镜像源；分片可能来自不同源，下载完成后可整体校验。\n"
+	    "GitHub 仓库可写 owner/repo.git、owner/repo 或完整仓库地址，\n"
+	    "自动下载默认分支的 ZIP 源码包（不含 Git 历史）。\n"
+	    "用 --release 下载最新正式 Release，自动选择平台资产并校验 "
+	    "SHA-256。\n"
 	    "\n"
 	    "输出:\n"
 	    "  -O, --output FILE      输出文件名；FILE 以 / 结尾时视为目录\n"
@@ -89,6 +96,8 @@ static void usage(void)
 	    "      --no-resume        忽略断点，从头下载\n"
 	    "      --sha256 HEX       下载完成后校验整文件 SHA-256\n"
 	    "      --no-range         禁用分片，走单连接\n"
+	    "      --release          下载 GitHub 最新正式 Release 并自动校验\n"
+	    "      --asset NAME       指定 Release 资产的精确文件名\n"
 	    "\n"
 	    "网络:\n"
 	    "      --proxy URL        使用指定代理\n"
@@ -359,6 +368,19 @@ static int parse_args(int argc, char **argv, struct cli *c)
 		if (!strcmp(a, "--no-range")) {
 			c->opts.allow_range = 0;
 			c->set |= SET_NORANGE;
+			continue;
+		}
+		if (!strcmp(a, "--release") || !strcmp(a, "--latest-release")) {
+			c->latest_release = 1;
+			continue;
+		}
+		if (!strcmp(a, "--asset") || !strncmp(a, "--asset=", 8)) {
+			c->release_asset = long_value(argc, argv, &i, a, 7);
+			if (!c->release_asset || !c->release_asset[0]) {
+				c->bad_text = a;
+				return -1;
+			}
+			c->latest_release = 1;
 			continue;
 		}
 		if (!strcmp(a, "--no-proxy")) {
@@ -641,17 +663,42 @@ static void add_mirror_url(const struct edwl_url *base, const char *spec,
 	(*n)++;
 }
 
-static size_t expand_urls(const struct edwl_config *cfg, const struct cli *c,
-			  const char **urls, char *owned[], size_t max)
+static int expand_urls(const struct edwl_config *cfg, const struct cli *c,
+		       const char **urls, char *owned[], size_t max,
+		       size_t *url_count)
 {
 	size_t i;
 	size_t n = 0;
 
 	for (i = 0; i < c->url_count && n < max; i++) {
 		const char *u = c->urls[i];
+		char normalized[EDWL_URL_MAX];
 		const struct edwl_mirror_map *m;
 		struct edwl_url parsed;
 		const char *p;
+		int rc;
+
+		rc = edwl_url_normalize_github(u, normalized,
+					       sizeof(normalized));
+		if (rc < 0) {
+			edwl_log_msg(EDWL_LOG_ERROR,
+				     "无效的 URL 或 GitHub 仓库地址: %s", u);
+			return EDWL_EXIT_USAGE;
+		}
+		if (rc > 0) {
+			size_t len = strlen(normalized) + 1;
+
+			owned[n] = malloc(len);
+			if (!owned[n]) {
+				edwl_log_msg(EDWL_LOG_ERROR,
+					     "无法分配仓库地址内存");
+				return EDWL_EXIT_ERROR;
+			}
+			memcpy(owned[n], normalized, len);
+			u = owned[n];
+			edwl_log_msg(EDWL_LOG_INFO,
+				     "GitHub 仓库: %s（默认分支 ZIP）", u);
+		}
 
 		urls[n++] = u;
 		if (!cfg->mirrors)
@@ -681,7 +728,60 @@ static size_t expand_urls(const struct edwl_config *cfg, const struct cli *c,
 			p = comma + 1;
 		}
 	}
-	return n;
+	*url_count = n;
+	return EDWL_EXIT_OK;
+}
+
+static int resolve_release(struct cli *c, struct edwl_github_release *release)
+{
+	struct edwl_http *http = NULL;
+	struct edwl_http_opts opts = {0};
+	char error[256];
+	char repository[144];
+	int rc;
+
+	if (c->url_count != 1) {
+		edwl_log_msg(EDWL_LOG_ERROR,
+			     "--release 需要且只接受一个 GitHub 仓库地址");
+		return EDWL_EXIT_USAGE;
+	}
+	if (edwl_url_github_repo(c->urls[0], repository, sizeof(repository)) !=
+	    0) {
+		edwl_log_msg(EDWL_LOG_ERROR,
+			     "--release 需要有效的 GitHub 仓库地址");
+		return EDWL_EXIT_USAGE;
+	}
+	opts.user_agent = c->opts.user_agent;
+	opts.connect_timeout_ms = c->opts.connect_timeout_ms;
+	opts.low_speed_time_ms = c->opts.low_speed_time_ms;
+	opts.low_speed_limit = 1;
+	opts.max_recv_speed = c->opts.max_speed;
+	opts.proxy = c->proxy;
+	opts.blacklist = c->opts.blacklist;
+	if (edwl_http_global_init() != 0) {
+		edwl_log_msg(EDWL_LOG_ERROR, "libcurl 初始化失败");
+		return EDWL_EXIT_ERROR;
+	}
+	if (edwl_http_open(&http, &opts) != 0) {
+		edwl_log_msg(EDWL_LOG_ERROR, "无法创建 Release HTTP 句柄");
+		edwl_http_global_fini();
+		return EDWL_EXIT_ERROR;
+	}
+	if (edwl_console_install_interrupt() != 0)
+		edwl_log_msg(EDWL_LOG_WARN, "未能安装 Ctrl-C 处理器");
+	rc = edwl_github_resolve_release(http, c->urls[0], c->release_asset,
+					 c->opts.expected_sha256, release,
+					 error, sizeof(error));
+	if (rc != 0)
+		edwl_log_msg(EDWL_LOG_ERROR, "Release 解析失败: %s", error);
+	edwl_http_close(http);
+	edwl_http_global_fini();
+	if (rc != 0)
+		return edwl_interrupt_requested() ? EDWL_EXIT_INTERRUPTED
+						  : EDWL_EXIT_ERROR;
+	c->urls[0] = release->url;
+	c->opts.expected_sha256 = release->sha256;
+	return EDWL_EXIT_OK;
 }
 
 int edwl_main(int argc, char **argv)
@@ -691,6 +791,7 @@ int edwl_main(int argc, char **argv)
 	struct edwl_blacklist *bl = NULL;
 	struct edwl_download_result result;
 	struct edwl_log_opts lopts;
+	struct edwl_github_release release;
 	const char *urls[MAX_URLS];
 	char *owned[MAX_URLS];
 	size_t url_count;
@@ -866,7 +967,15 @@ int edwl_main(int argc, char **argv)
 		}
 	}
 
-	url_count = expand_urls(&cfg, &c, urls, owned, MAX_URLS);
+	c.opts.blacklist = bl;
+	if (c.latest_release) {
+		rc = resolve_release(&c, &release);
+		if (rc != EDWL_EXIT_OK)
+			goto done;
+	}
+	rc = expand_urls(&cfg, &c, urls, owned, MAX_URLS, &url_count);
+	if (rc != EDWL_EXIT_OK)
+		goto done;
 
 	c.opts.urls = urls;
 	c.opts.url_count = url_count;
@@ -881,6 +990,7 @@ int edwl_main(int argc, char **argv)
 		(void)getchar();
 	}
 
+done:
 	for (i = 0; i < MAX_URLS; i++)
 		free(owned[i]);
 	edwl_blacklist_destroy(bl);

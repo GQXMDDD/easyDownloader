@@ -66,10 +66,45 @@ static void test_hash_helpers(void)
 	    "0"));
 }
 
+static void test_manifest(void)
+{
+	static const char hash[] =
+	    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	static const char other[] =
+	    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+	char text[512];
+	char found[EDWL_SHA256_HEX];
+
+	snprintf(text, sizeof(text), "%s  unrelated.zip\n%s *app.zip\r\n",
+		 other, hash);
+	CHECK_INT(edwl_sha256_manifest(text, "app.zip", 0, found), 1);
+	CHECK_STR(found, hash);
+	CHECK_INT(edwl_sha256_manifest(text, "missing.zip", 0, found), 0);
+	snprintf(text, sizeof(text), "SHA256 (app.zip) = %s\n", hash);
+	CHECK_INT(edwl_sha256_manifest(text, "app.zip", 0, found), 1);
+	CHECK_STR(found, hash);
+	snprintf(text, sizeof(text), "app.zip  SHA-256: %s\n", hash);
+	CHECK_INT(edwl_sha256_manifest(text, "app.zip", 0, found), 1);
+	CHECK_STR(found, hash);
+	CHECK_INT(edwl_sha256_manifest(hash, "app.zip", 0, found), 0);
+	CHECK_INT(edwl_sha256_manifest(hash, "app.zip", 1, found), 1);
+	snprintf(text, sizeof(text), "%s  app.zip\n%s  app.zip\n", hash, other);
+	CHECK_INT(edwl_sha256_manifest(text, "app.zip", 0, found), -1);
+	snprintf(text, sizeof(text), "%s  app.zip.bak\n", hash);
+	CHECK_INT(edwl_sha256_manifest(text, "app.zip", 0, found), 0);
+	snprintf(text, sizeof(text), "| `app.zip` | `%s` |\n", hash);
+	CHECK_INT(edwl_sha256_manifest(text, "app.zip", 0, found), 1);
+	CHECK_STR(found, hash);
+	snprintf(text, sizeof(text), "| %s | app.zip |\n", hash);
+	CHECK_INT(edwl_sha256_manifest(text, "app.zip", 0, found), 1);
+	CHECK_STR(found, hash);
+}
+
 int main(void)
 {
 	test_vectors();
 	test_long_input();
 	test_hash_helpers();
+	test_manifest();
 	return test_finish("test_checksum");
 }

@@ -19,6 +19,8 @@
 
 struct edwl_source_item {
 	char *url;
+	char *effective_url;
+	int use_effective_url;
 	unsigned fails;
 	uint64_t ready_at_ms;
 };
@@ -84,6 +86,7 @@ void edwl_sources_destroy(struct edwl_sources *s)
 		return;
 	for (i = 0; i < s->count; i++) {
 		free(s->items[i].url);
+		free(s->items[i].effective_url);
 	}
 	edwl_mutex_destroy(s->mtx);
 	free(s->items);
@@ -97,9 +100,34 @@ size_t edwl_sources_count(const struct edwl_sources *s)
 
 const char *edwl_sources_url(struct edwl_sources *s, size_t index)
 {
+	const char *url;
+
 	if (!s || index >= s->count)
 		return NULL;
-	return s->items[index].url;
+	edwl_mutex_lock(s->mtx);
+	url = s->items[index].use_effective_url ? s->items[index].effective_url
+						: s->items[index].url;
+	edwl_mutex_unlock(s->mtx);
+	return url;
+}
+
+int edwl_sources_set_effective_url(struct edwl_sources *s, size_t index,
+				   const char *url)
+{
+	char *copy;
+	size_t len;
+
+	if (!s || index >= s->count || !url || !url[0])
+		return -1;
+	len = strlen(url) + 1;
+	copy = malloc(len);
+	if (!copy)
+		return -1;
+	memcpy(copy, url, len);
+	free(s->items[index].effective_url);
+	s->items[index].effective_url = copy;
+	s->items[index].use_effective_url = 1;
+	return 0;
 }
 
 int edwl_sources_pick(struct edwl_sources *s, size_t *index)
@@ -147,6 +175,7 @@ void edwl_sources_report_fail(struct edwl_sources *s, size_t index)
 
 	edwl_mutex_lock(s->mtx);
 	it = &s->items[index];
+	it->use_effective_url = 0;
 	if (it->fails < 1000)
 		it->fails++;
 	shift = it->fails > 0 ? it->fails - 1 : 0;
